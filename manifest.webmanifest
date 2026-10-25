@@ -1,0 +1,15 @@
+{
+  "name": "单词大冒险 · 背单词小游戏",
+  "short_name": "单词大冒险",
+  "description": "打怪闯关背单词：间隔重复、语音跟读、记忆配对",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#14102e",
+  "theme_color": "#7c5cff",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

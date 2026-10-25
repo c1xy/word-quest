@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>单词大冒险 · 背单词小游戏</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚔️</text></svg>">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#7c5cff">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ============ 主菜单 ============ -->
+  <section class="screen active" id="scr-home">
+    <div class="deco-layer" id="home-deco">🌲 ✨ 🍄 ⛰️ 🌟 🌲 ✨ 🦋</div>
+    <div class="home-inner">
+      <h1 class="logo">⚔️ 单词大冒险</h1>
+      <p class="slogan">打怪 · 闯关 · 记单词</p>
+      <div class="stat-chips">
+        <span class="chip">🔥 连续打卡 <b id="home-streak">0</b> 天</span>
+        <span class="chip">🏆 最远 <b id="home-best">0</b> 关</span>
+        <span class="chip">📚 已掌握 <b id="home-mastered">0</b> 词</span>
+        <span class="chip">✏️ 今日答题 <b id="home-today">0</b> 题</span>
+      </div>
+      <div class="plan-card" id="plan-card">
+        <div class="plan-ring">
+          <svg viewBox="0 0 66 66"><circle class="ring-bg" cx="33" cy="33" r="29"></circle><circle class="ring-fill" id="plan-ring" cx="33" cy="33" r="29"></circle></svg>
+          <span class="ring-text" id="plan-ring-text">0%</span>
+        </div>
+        <div class="plan-info">
+          <div class="plan-name">🎯 今日学习计划</div>
+          <div class="plan-desc" id="plan-desc">复习 0 个到期词 + 学 10 个新词</div>
+          <button class="btn btn-primary btn-small" id="btn-plan">▶ 开始计划</button>
+        </div>
+      </div>
+      <div class="daily-panel" id="daily-panel">
+        <div class="daily-title">📅 今日任务 <span class="daily-sub">每天零点刷新</span></div>
+        <div id="daily-tasks"></div>
+      </div>
+      <div class="menu">
+        <button class="btn btn-primary btn-big" id="btn-adventure">
+          🧭 冒险模式<small>闯关打 Boss，越战越勇</small>
+        </button>
+        <button class="btn btn-big" id="btn-endless">
+          ♾️ 无尽挑战<small>节奏越来越快，你能撑多远</small>
+        </button>
+        <button class="btn btn-big" id="btn-review">
+          📖 复习模式<small>专攻还没记住的词</small>
+        </button>
+        <button class="btn btn-big" id="btn-match">
+          🃏 记忆配对<small>翻牌配对单词和释义</small>
+        </button>
+      </div>
+      <div class="menu-row">
+        <button class="btn btn-small btn-primary" id="btn-wrongbook">📕 错题本</button>
+        <button class="btn btn-small" id="btn-codex">📖 单词图鉴</button>
+        <button class="btn btn-small" id="btn-ach">🏆 成就</button>
+        <button class="btn btn-small" id="btn-settings">⚙️ 设置</button>
+        <button class="btn btn-small" id="btn-help">❓ 玩法说明</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 出战设置 ============ -->
+  <section class="screen" id="scr-setup">
+    <div class="panel">
+      <h2 class="panel-title" id="setup-title">🧭 出战准备</h2>
+
+      <h3 class="section-title">📚 选择词库（可多选）</h3>
+      <div id="setup-lists" class="setup-lists"></div>
+
+      <div id="unit-row" class="unit-row" hidden>
+        <span class="unit-label">📔 单元模式</span>
+        <select id="unit-select" class="plan-select"></select>
+        <span class="unit-progress" id="unit-progress"></span>
+      </div>
+      <p class="hint" id="unit-hint" hidden>单元模式下：新词按单元顺序推进（像背单词书），复习仍按遗忘曲线全局调度</p>
+
+      <div id="setup-diff-wrap">
+        <h3 class="section-title">🎚️ 难度</h3>
+        <div class="diff-row">
+          <label class="diff-opt"><input type="radio" name="diff" value="easy"><span>😌 轻松<br><small>20秒/题 · 血厚</small></span></label>
+          <label class="diff-opt"><input type="radio" name="diff" value="normal" checked><span>🙂 标准<br><small>14秒/题</small></span></label>
+          <label class="diff-opt"><input type="radio" name="diff" value="hard"><span>😤 挑战<br><small>10秒/题 · 怪狠</small></span></label>
+        </div>
+      </div>
+
+      <div class="setup-actions">
+        <button class="btn btn-small" id="btn-setup-back">← 返回</button>
+        <button class="btn btn-primary btn-big" id="btn-start">🚀 开始战斗！</button>
+      </div>
+      <p class="hint" id="setup-hint"></p>
+    </div>
+  </section>
+
+  <!-- ============ 战斗 ============ -->
+  <section class="screen" id="scr-battle">
+    <div class="deco-layer" id="battle-deco"></div>
+
+    <header class="battle-top">
+      <button class="btn btn-tiny" id="btn-quit">🏳️ 退出</button>
+      <span class="top-info" id="battle-stage">第 1 关</span>
+      <span class="top-info">🪙 <b id="battle-coins">0</b></span>
+      <span class="top-info combo" id="battle-combo"></span>
+    </header>
+
+    <div class="timer-wrap"><div class="timer-fill" id="timer-fill"></div></div>
+
+    <div class="pressure-wrap" id="pressure-wrap">
+      <span class="pressure-castle">🏰</span>
+      <div class="pressure-bar" id="pressure-bar">
+        <div class="pressure-fill" id="pressure-fill"></div>
+        <span class="pressure-army" id="pressure-army">👹</span>
+      </div>
+      <span class="pressure-label" id="pressure-label">城防 100%</span>
+    </div>
+
+    <div class="battlefield">
+      <!-- 怪物区 -->
+      <div class="monster-zone">
+        <div class="monster-hp-wrap">
+          <div class="monster-hp-bar"><div class="monster-hp-fill" id="monster-hp-fill"></div></div>
+          <span class="monster-name" id="monster-name">小幽灵</span>
+          <div class="boss-mod" id="boss-mod" hidden></div>
+        </div>
+        <div class="monster-emoji" id="monster-emoji">👻</div>
+        <div class="monster-queue" id="monster-queue"></div>
+      </div>
+
+      <div class="vs-flash">⚡ VS ⚡</div>
+
+      <!-- 勇者区 -->
+      <div class="hero-zone">
+        <div class="hero-emoji" id="hero-emoji">🧙‍♂️</div>
+        <div class="pet-emoji" id="pet-emoji"></div>
+        <div class="hero-hp-wrap">
+          <div class="hero-hp-bar"><div class="hero-hp-fill" id="hero-hp-fill"></div></div>
+          <span class="hero-hp-text" id="hero-hp-text">30/30 ❤️</span>
+          <div class="hero-buffs" id="hero-buffs"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 题目区 -->
+    <div class="q-card" id="q-card">
+      <div class="q-type" id="q-type">选出正确的英文</div>
+      <div class="q-prompt" id="q-prompt">apple</div>
+      <button class="btn btn-tiny listen-replay" id="btn-replay" hidden>🔊 再听一次</button>
+
+      <div class="q-options" id="q-options"></div>
+
+      <div class="q-spell" id="q-spell" hidden>
+        <div class="spell-slots" id="spell-slots"></div>
+        <div class="spell-chips" id="spell-chips"></div>
+        <div class="spell-actions">
+          <button class="btn btn-tiny" id="btn-spell-hint">💡 提示</button>
+          <button class="btn btn-tiny" id="btn-spell-back">⌫ 退格</button>
+          <button class="btn btn-tiny btn-primary" id="btn-spell-submit">✅ 提交</button>
+        </div>
+      </div>
+
+      <div class="q-tools">
+        <button class="btn btn-tiny" id="btn-hint" hidden>💡 五五开 (<span id="hint-count">0</span>)</button>
+      </div>
+    </div>
+
+    <div class="fx-layer" id="fx-layer"></div>
+  </section>
+
+  <!-- ============ 商店（过关后） ============ -->
+  <section class="screen" id="scr-shop">
+    <div class="panel">
+      <h2 class="panel-title">🏪 冒险商店 <span class="coin-badge">🪙 <b id="shop-coins">0</b></span></h2>
+      <p class="hint" id="shop-sub"></p>
+
+      <h3 class="section-title">🧪 本局补给（只在本局冒险生效）</h3>
+      <div class="shop-grid" id="shop-items"></div>
+
+      <h3 class="section-title">💠 永久强化（一直生效，越买越贵）</h3>
+      <div class="shop-grid upgrades" id="shop-upgrades"></div>
+
+      <h3 class="section-title">🐣 宠物（永久拥有 · 选一只出战）</h3>
+      <div class="shop-grid upgrades" id="shop-pets"></div>
+
+      <button class="btn btn-primary btn-big" id="btn-next-stage">➡️ 继续冒险</button>
+    </div>
+  </section>
+
+  <!-- ============ 结算 ============ -->
+  <section class="screen" id="scr-result">
+    <div class="panel">
+      <h2 class="panel-title" id="result-title">⚔️ 冒险结束</h2>
+      <div class="result-stats" id="result-stats"></div>
+      <h3 class="section-title">📜 本局单词回顾</h3>
+      <div class="result-words" id="result-words"></div>
+      <div class="setup-actions">
+        <button class="btn btn-primary" id="btn-retry-wrong" hidden>🔁 再战错词</button>
+        <button class="btn" id="btn-again">🔄 再来一局</button>
+        <button class="btn" id="btn-result-home">🏠 回主页</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 单词图鉴 ============ -->
+  <section class="screen" id="scr-codex">
+    <div class="panel wide">
+      <h2 class="panel-title">📖 单词图鉴</h2>
+      <div id="codex-stats" class="codex-stats"></div>
+      <canvas id="stats-canvas"></canvas>
+      <div class="codex-tools">
+        <input type="text" id="codex-search" placeholder="🔍 搜索单词或释义…">
+        <div class="filter-row" id="codex-filters">
+          <button class="btn btn-tiny filter active" data-f="all">全部</button>
+          <button class="btn btn-tiny filter" data-f="new">⬜ 未学</button>
+          <button class="btn btn-tiny filter" data-f="learning">🔵 学习中</button>
+          <button class="btn btn-tiny filter" data-f="mastered">⭐ 已掌握</button>
+          <button class="btn btn-tiny filter" data-f="wrong">❌ 易错词</button>
+        </div>
+      </div>
+      <div class="codex-list" id="codex-list"></div>
+
+      <h3 class="section-title">⚔️ 易混淆词对</h3>
+      <div id="confuse-list"></div>
+
+      <h3 class="section-title">✏️ 我的词库</h3>
+      <p class="hint">每行一个：英文 + 释义（用空格、冒号或制表符分隔），例如 <code>apple n. 苹果</code></p>
+      <div class="custom-editor">
+        <input type="text" id="custom-name" placeholder="词库名称，如：我的考研真题词" maxlength="20">
+        <textarea id="custom-text" rows="5" placeholder="abandon v. 放弃&#10;absorb v. 吸收&#10;（每行一个单词）"></textarea>
+        <div class="setup-actions">
+          <button class="btn btn-small btn-primary" id="btn-custom-save">💾 保存词库</button>
+        </div>
+      </div>
+      <div id="custom-lists" class="custom-lists"></div>
+
+      <div class="setup-actions">
+        <button class="btn btn-small" id="btn-codex-back">← 返回</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 错题本 ============ -->
+  <section class="screen" id="scr-wrong">
+    <div class="panel wide">
+      <h2 class="panel-title">📕 错题本</h2>
+      <div class="codex-stats" id="wrong-stats"></div>
+      <div class="result-words" id="wrong-list"></div>
+      <div class="setup-actions">
+        <button class="btn btn-small btn-primary" id="btn-drill">🔥 开始强化训练</button>
+        <button class="btn btn-small" id="btn-wrong-back">← 返回</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 记忆配对 ============ -->
+  <section class="screen" id="scr-match">
+    <div class="panel wide">
+      <h2 class="panel-title">🃏 记忆配对</h2>
+      <p class="hint">翻开卡片，把单词和它的释义配成一对，越快越准奖励越多！</p>
+      <div class="match-stats">
+        <span class="chip" id="match-moves">👟 步数 0</span>
+        <span class="chip" id="match-time">⏱ 0 秒</span>
+        <span class="chip" id="match-pairs">🧩 0/8 对</span>
+      </div>
+      <div class="match-grid" id="match-grid"></div>
+      <div class="setup-actions">
+        <button class="btn btn-small btn-primary" id="btn-match-restart">🔄 再来一局</button>
+        <button class="btn btn-small" id="btn-match-back">← 返回</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 成就 ============ -->
+  <section class="screen" id="scr-ach">
+    <div class="panel wide">
+      <h2 class="panel-title">🏆 成就墙 <span class="coin-badge" id="ach-count">0 / 0</span></h2>
+      <div class="ach-grid" id="ach-grid"></div>
+      <p class="hint">每个成就解锁奖励 20 金币</p>
+      <div class="setup-actions">
+        <button class="btn btn-small" id="btn-ach-back">← 返回</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 设置 ============ -->
+  <section class="screen" id="scr-settings">
+    <div class="panel">
+      <h2 class="panel-title">⚙️ 设置</h2>
+
+      <label class="setting-row"><span>🔔 音效</span><input type="checkbox" id="set-sound" checked></label>
+      <label class="setting-row"><span>🔊 自动发音（答题后读一遍单词）</span><input type="checkbox" id="set-autoplay" checked></label>
+      <label class="setting-row"><span>🎵 背景音乐</span><input type="checkbox" id="set-bgm" checked></label>
+      <label class="setting-row"><span>🎬 语速 <b id="rate-val">0.9</b></span><input type="range" id="set-rate" min="0.5" max="1.2" step="0.1" value="0.9"></label>
+
+      <label class="setting-row"><span>🌱 每日新词目标 <b id="plan-target-val">10</b> 个</span>
+        <select id="set-plan-target" class="plan-select">
+          <option value="5">5</option>
+          <option value="10" selected>10</option>
+          <option value="15">15</option>
+          <option value="20">20</option>
+        </select>
+      </label>
+
+      <h3 class="section-title">🎮 题型开关</h3>
+      <label class="setting-row"><span>🇨🇳 看中文 → 选英文</span><input type="checkbox" id="qt-c2e" checked></label>
+      <label class="setting-row"><span>🇬🇧 看英文 → 选中文</span><input type="checkbox" id="qt-e2c" checked></label>
+      <label class="setting-row"><span>🔤 拼写题（拼出单词）</span><input type="checkbox" id="qt-spell" checked></label>
+      <label class="setting-row"><span>👂 听音题（听发音选词）<i id="tts-note" class="hint-inline"></i></span><input type="checkbox" id="qt-listen" checked></label>
+
+      <div class="setup-actions">
+        <button class="btn btn-small" id="btn-export">📤 导出存档</button>
+        <button class="btn btn-small" id="btn-import">📥 导入存档</button>
+        <button class="btn btn-small danger" id="btn-reset">🗑️ 重置全部进度</button>
+        <button class="btn btn-small" id="btn-settings-back">← 返回</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 帮助 ============ -->
+  <section class="screen" id="scr-help">
+    <div class="panel">
+      <h2 class="panel-title">❓ 玩法说明</h2>
+      <div class="help-body">
+        <p><b>🏰 怎么守城？</b>敌军大军压境：每道题<b>给出中文释义，从四个英文单词里选出答案</b>——选项都是精心挑选的迷惑项（同词根、同开头、你混淆过的词优先登场）。<b>犹豫时敌军持续推进</b>（红色压境条），答对 + 连击把敌军打退，答错或超时敌军大幅压进；压境条满 100% 城墙失守。其它题型（看英选中 / 听音 / 拼写）可在设置里开启。</p>
+        <p><b>📕 错题本</b>答错的词自动入册（跨局累积），主页「错题本」可查看并一键发起强化训练，答对升到 3 星自动攻克出册。</p>
+        <p><b>🧠 答错了怎么办？</b>答错会弹出「记忆卡片」展示单词、释义和发音。卡片关闭后，<b>同一个词会换个题型马上再考你一次</b>；之后它还会变成「复仇怪物」过几题再回来找你——想忘记都难。</p>
+        <p><b>⭐ 掌握度是什么？</b>每个词 0~5 星：答对 +1 星，答错 -1 星。星级越高，这个词出现得越少；低星词和易错词会优先出现（这就是「间隔重复」）。集满 5 星 = 已掌握。</p>
+        <p><b>🪙 金币怎么用？</b>答题和连击赚金币，过关后到商店买药水、护盾、提示卡，或购买永久强化（血量上限、答题时限、初始护盾、金币加成）。</p>
+        <p><b>📖 复习模式</b>不扣血、没压力，专门刷低掌握度和易错的词，适合考前突击。</p>
+        <p><b>⌨️ 小技巧</b>选择题可按键盘 <b>1 2 3 4</b> 作答；拼写题可直接敲键盘字母——<b>中文输入法状态下也能用</b>（游戏按物理键位识别），若个别按键仍无反应，可切换到英文输入法。</p>
+        <p><b>🔥 连续打卡</b>每天答题就会累计，中断会清零，坚持就是胜利！</p>
+      </div>
+      <div class="setup-actions">
+        <button class="btn btn-small" id="btn-help-back">← 返回</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 记忆卡片（答错弹出） -->
+  <div class="overlay" id="memcard" hidden>
+    <div class="memcard-box">
+      <div class="memcard-tag">🧠 记忆卡片</div>
+      <div class="memcard-word" id="mem-word">word</div>
+      <button class="btn btn-tiny" id="mem-speak">🔊 读一遍</button>
+      <div class="memcard-meaning" id="mem-meaning">释义</div>
+      <div class="memcard-code" id="mem-code" hidden></div>
+      <div class="mem-family" id="mem-family" hidden></div>
+      <button class="btn btn-tiny" id="mem-speak-btn" hidden>🎤 跟读挑战 +5🪙</button>
+      <button class="btn btn-primary" id="mem-ok">记住了，继续战斗！</button>
+    </div>
+  </div>
+
+  <!-- 横幅（关卡开始/通关/Boss） -->
+  <div class="overlay banner-overlay" id="banner" hidden>
+    <div class="banner-box" id="banner-box">第 1 关</div>
+  </div>
+
+  <!-- 单词详情卡 -->
+  <div class="overlay" id="word-overlay" hidden>
+    <div class="memcard-box">
+      <div class="memcard-tag">📖 单词详情</div>
+      <div class="memcard-word" id="wo-word">word</div>
+      <button class="btn btn-tiny" id="wo-speak">🔊 发音</button>
+      <div class="memcard-meaning" id="wo-meaning">释义</div>
+      <div class="memcard-code" id="wo-code" hidden></div>
+      <div class="mem-family" id="wo-family" hidden></div>
+      <div class="wo-stats" id="wo-stats"></div>
+      <div class="spell-actions">
+        <button class="btn btn-tiny btn-primary" id="wo-master">⭐ 标记已掌握</button>
+        <button class="btn btn-tiny" id="wo-reset">♻️ 重置记录</button>
+        <button class="btn btn-tiny" id="wo-close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 存档导出/导入 -->
+  <div class="overlay" id="io-overlay" hidden>
+    <div class="memcard-box io-box">
+      <div class="memcard-tag" id="io-title">📤 导出存档</div>
+      <textarea id="io-text" spellcheck="false"></textarea>
+      <div class="spell-actions">
+        <button class="btn btn-tiny" id="io-copy">📋 复制</button>
+        <button class="btn btn-primary btn-tiny" id="io-ok">确定</button>
+        <button class="btn btn-tiny" id="io-cancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 全局提示 -->
+  <div id="toast-wrap"></div>
+
+</div>
+
+<script src="words.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
