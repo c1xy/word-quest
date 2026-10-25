@@ -4,7 +4,9 @@
 
 ## 🚀 怎么玩
 
-直接双击 `index.html` 用浏览器打开即可（推荐 Chrome / Edge）。
+在线版（手机可安装离线玩）：**https://c1xy.github.io/word-quest/**
+
+本地版：直接双击 `index.html` 用浏览器打开即可（推荐 Chrome / Edge）。
 
 **📱 安装到手机/桌面（PWA 离线可玩）**：用本地服务打开（在 word-quest 目录运行 `python -m http.server 8931` 或 `npx serve`，手机访问 `http://电脑IP:8931`），然后浏览器菜单选「安装应用 / 添加到主屏幕」。之后无需联网也能玩，更新文件后自动生效。
 
