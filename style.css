@@ -687,6 +687,23 @@ body {
 .mcard.done { animation: matchPop .35s ease; pointer-events: none; }
 @keyframes matchPop { 0% { transform: scale(1); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
 
+/* ---------- 记忆提示（词根 + 图像） ---------- */
+.q-memo {
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(124,232,255,.08);
+  border: 1px dashed rgba(124,232,255,.4);
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin: -4px 0 12px;
+  text-align: left;
+}
+.q-memo .memo-emoji { font-size: 40px; line-height: 1; flex-shrink: 0; }
+.q-memo .memo-body { flex: 1; font-size: 13px; line-height: 1.6; }
+.q-memo .memo-code { color: #7ce8ff; font-weight: 700; }
+.q-memo .memo-fam { color: var(--c-sub); font-size: 12px; margin-top: 2px; }
+.q-tools { display: flex; gap: 8px; justify-content: center; }
+.mem-emoji { font-size: 60px; line-height: 1.2; filter: drop-shadow(0 4px 8px rgba(0,0,0,.4)); }
+
 /* ---------- 词汇密码 ---------- */
 .memcard-code {
   font-size: 13px; color: #7ce8ff;

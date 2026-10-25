@@ -161,6 +161,8 @@
       <div class="q-prompt" id="q-prompt">apple</div>
       <button class="btn btn-tiny listen-replay" id="btn-replay" hidden>🔊 再听一次</button>
 
+      <div class="q-memo" id="q-memo" hidden></div>
+
       <div class="q-options" id="q-options"></div>
 
       <div class="q-spell" id="q-spell" hidden>
@@ -174,6 +176,7 @@
       </div>
 
       <div class="q-tools">
+        <button class="btn btn-tiny" id="btn-memo" hidden>🔍 记忆提示</button>
         <button class="btn btn-tiny" id="btn-hint" hidden>💡 五五开 (<span id="hint-count">0</span>)</button>
       </div>
     </div>
@@ -337,6 +340,7 @@
       <div class="help-body">
         <p><b>🏰 怎么守城？</b>敌军大军压境：每道题<b>给出中文释义，从四个英文单词里选出答案</b>——选项都是精心挑选的迷惑项（同词根、同开头、你混淆过的词优先登场）。<b>犹豫时敌军持续推进</b>（红色压境条），答对 + 连击把敌军打退，答错或超时敌军大幅压进；压境条满 100% 城墙失守。其它题型（看英选中 / 听音 / 拼写）可在设置里开启。</p>
         <p><b>📕 错题本</b>答错的词自动入册（跨局累积），主页「错题本」可查看并一键发起强化训练，答对升到 3 星自动攻克出册。</p>
+        <p><b>🔍 记忆提示</b>答题时点「记忆提示」可查看该词的 <b>emoji 图像联想 + 词根拆解 + 同根词家族</b>（如 agriculture = agri 田地 + culture 培养 🚜）——先想再看，记忆更深。</p>
         <p><b>🧠 答错了怎么办？</b>答错会弹出「记忆卡片」展示单词、释义和发音。卡片关闭后，<b>同一个词会换个题型马上再考你一次</b>；之后它还会变成「复仇怪物」过几题再回来找你——想忘记都难。</p>
         <p><b>⭐ 掌握度是什么？</b>每个词 0~5 星：答对 +1 星，答错 -1 星。星级越高，这个词出现得越少；低星词和易错词会优先出现（这就是「间隔重复」）。集满 5 星 = 已掌握。</p>
         <p><b>🪙 金币怎么用？</b>答题和连击赚金币，过关后到商店买药水、护盾、提示卡，或购买永久强化（血量上限、答题时限、初始护盾、金币加成）。</p>
@@ -354,6 +358,7 @@
   <div class="overlay" id="memcard" hidden>
     <div class="memcard-box">
       <div class="memcard-tag">🧠 记忆卡片</div>
+      <div class="mem-emoji" id="mem-emoji" hidden></div>
       <div class="memcard-word" id="mem-word">word</div>
       <button class="btn btn-tiny" id="mem-speak">🔊 读一遍</button>
       <div class="memcard-meaning" id="mem-meaning">释义</div>

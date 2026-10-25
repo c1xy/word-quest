@@ -267,6 +267,14 @@ var DIFFS = {
   hard:   { sec: 10, hp: 24, dmg: 8, name: '挑战' }
 };
 
+/* 记忆提示：图像 + 词根拆解 + 同根词家族 */
+function memoOf(w) {
+  var emoji = (typeof EMOJI_OF !== 'undefined' && EMOJI_OF[w]) ? EMOJI_OF[w] : '';
+  var code = wordCode(w);
+  var fam = wordFamily(w).slice(0, 3).map(function (x) { return x.w; });
+  return { emoji: emoji, code: code, fam: fam };
+}
+
 var TYPE_LABEL = {
   c2e: '🇨🇳 选出对应的英文',
   e2c: '🇬🇧 选出正确的中文释义',
@@ -1426,6 +1434,19 @@ function renderQuestion() {
   $('btn-hint').disabled = run.hints <= 0;
   $('hint-count').textContent = run.hints;
 
+  /* 记忆提示（词根 + 图像）：有内容才显示按钮，每题重置 */
+  var memo = memoOf(q.word.w);
+  $('q-memo').hidden = true;
+  $('btn-memo').hidden = !(memo.emoji || memo.code);
+  var memoHtml = '';
+  if (memo.emoji) memoHtml += '<span class="memo-emoji">' + memo.emoji + '</span>';
+  var body = '';
+  if (memo.code) body += '<div class="memo-code">🔑 ' + memo.code + '</div>';
+  if (memo.fam.length) body += '<div class="memo-fam">👨‍👩‍👧 同根词：' + memo.fam.join(' · ') + '</div>';
+  if (!memo.code && !memo.fam.length) body = '<div class="memo-code">🖼️ 图像联想记忆</div>';
+  memoHtml += '<span class="memo-body">' + body + '</span>';
+  $('q-memo').innerHTML = memoHtml;
+
   var prompt = $('q-prompt');
   prompt.className = 'q-prompt';
 
@@ -2121,6 +2142,9 @@ function fx(text, cls, x, y) {
 
 var memCb = null;
 function showMemCard(word, cb) {
+  var emoji = (typeof EMOJI_OF !== 'undefined' && EMOJI_OF[word.w]) ? EMOJI_OF[word.w] : '';
+  $('mem-emoji').textContent = emoji;
+  $('mem-emoji').hidden = !emoji;
   $('mem-word').textContent = word.w;
   $('mem-meaning').textContent = word.m;
   var code = wordCode(word.w);
@@ -2474,7 +2498,8 @@ function humanizeDue(ms) {
 function openWordDetail(w) {
   woWord = w;
   var mean = MEANING_OF[w] || meaningOfAny(w) || '';
-  $('wo-word').textContent = w;
+  var wEmoji = (typeof EMOJI_OF !== 'undefined' && EMOJI_OF[w]) ? EMOJI_OF[w] + ' ' : '';
+  $('wo-word').textContent = wEmoji + w;
   $('wo-meaning').textContent = mean;
   var code = wordCode(w);
   $('wo-code').textContent = code ? '🔑 词汇密码：' + code : '';
@@ -2711,6 +2736,11 @@ function bindEvents() {
     if (run && run.q && run.q.type === 'listen') TTS.speak(run.q.word.w, true);
   };
   $('btn-hint').onclick = useHint;
+  $('btn-memo').onclick = function () {
+    var el = $('q-memo');
+    el.hidden = !el.hidden;
+    this.blur();
+  };
   $('btn-spell-back').onclick = spellBack;
   $('btn-spell-submit').onclick = submitSpell;
   $('btn-spell-hint').onclick = spellHint;
