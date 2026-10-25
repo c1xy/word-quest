@@ -45,7 +45,8 @@ function defaultSave() {
     unit: {},            // listId -> 当前单元索引（0 起）
     unitMode: 'none',    // none | auto | 单元号(1起)
     unitList: 'cet4',
-    wrongBook: {}        // word -> { n: 答错次数, t: 最近答错时间 }
+    wrongBook: {},       // word -> { n: 答错次数, t: 最近答错时间 }
+    sessionSize: 10      // 本局词量（每关怪物数 / 复习总题数）
   };
 }
 
@@ -58,7 +59,7 @@ function loadSave() {
     ['coins', 'mastery', 'customLists', 'lastLists', 'lastDiff'].forEach(function (k) {
       if (s[k] !== undefined) d[k] = s[k];
     });
-    ['upgrades', 'streak', 'best', 'settings', 'daily', 'ach', 'pets', 'stats', 'plan', 'planDay', 'dailyLog', 'confuse', 'unit', 'wrongBook'].forEach(function (k) {
+    ['upgrades', 'streak', 'best', 'settings', 'daily', 'ach', 'pets', 'stats', 'plan', 'planDay', 'dailyLog', 'confuse', 'unit', 'wrongBook', 'sessionSize'].forEach(function (k) {
       if (s[k]) d[k] = Object.assign(d[k], s[k]);
     });
     d.settings.qtypes = Object.assign(defaultSave().settings.qtypes, (s.settings || {}).qtypes || {});
@@ -1295,8 +1296,13 @@ function startRun(mode, listIds, diffKey, explicitPool) {
     run.unitSet = {};
     run.unitCtx.words.forEach(function (x) { run.unitSet[x.w] = 1; });
   }
-  if (mode === 'plan' || mode === 'review' || mode === 'drill') {
-    run.reviewTotal = pool.length < 4 ? pool.length * 2 : pool.length;  /* 小词池对决：每词来两遍 */
+  if (mode === 'plan') {
+    run.reviewTotal = pool.length;
+  } else if (mode === 'review' || mode === 'drill') {
+    /* 普通复习/强化按"本局词量"取题；小词池对决每词来两遍 */
+    run.reviewTotal = explicitPool
+      ? (pool.length < 4 ? pool.length * 2 : pool.length)
+      : Math.min(Math.max(save.sessionSize || 10, pool.length ? 1 : 0), pool.length);
   }
 
   save.lastLists = listIds; save.lastDiff = diffKey; persist();
@@ -1332,7 +1338,7 @@ function beginStage() {
   run.enrage = false;
   run.bossStage = (run.mode === 'adventure' && run.stage % 5 === 0);
   run.bossMod = run.bossStage ? rnd(Object.keys(BOSS_MODS)) : '';
-  run.stageSize = run.bossStage ? 1 : (6 + (run.stage >= 10 ? 1 : 0) + (run.stage >= 20 ? 1 : 0));
+  run.stageSize = run.bossStage ? 1 : Math.max(4, save.sessionSize || 10);
   run.stageBonus = run.hgStack;  // 消耗沙漏
   run.hgStack = 0;
 
@@ -2238,7 +2244,7 @@ function showScreen(id) {
 
 function refreshHome() {
   $('home-streak').textContent = save.streak.count;
-  $('home-best').textContent = Math.max(save.best.adventure, save.best.endless);
+  $('home-coins').textContent = save.coins;
   $('home-mastered').textContent = masteredCount();
   $('home-today').textContent = save.streak.todayCount;
   renderDaily();
@@ -2256,6 +2262,8 @@ function openSetup(mode) {
 
   var radios = document.querySelectorAll('input[name=diff]');
   radios.forEach(function (r) { r.checked = (r.value === save.lastDiff); });
+  $('setup-size').value = String(save.sessionSize || 10);
+  $('size-note').textContent = mode === 'review' ? '本次复习的单词数量' : '每关出战的单词数量';
 
   showScreen('scr-setup');
 }
@@ -2687,6 +2695,10 @@ function bindEvents() {
   $('setup-lists').addEventListener('change', updateSetupHint);
   $('unit-select').onchange = function () {
     save.unitMode = this.value;
+    persist();
+  };
+  $('setup-size').onchange = function () {
+    save.sessionSize = parseInt(this.value, 10) || 10;
     persist();
   };
 

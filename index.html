@@ -20,7 +20,7 @@
       <p class="slogan">打怪 · 闯关 · 记单词</p>
       <div class="stat-chips">
         <span class="chip">🔥 连续打卡 <b id="home-streak">0</b> 天</span>
-        <span class="chip">🏆 最远 <b id="home-best">0</b> 关</span>
+        <span class="chip">🪙 金币 <b id="home-coins">0</b></span>
         <span class="chip">📚 已掌握 <b id="home-mastered">0</b> 词</span>
         <span class="chip">✏️ 今日答题 <b id="home-today">0</b> 题</span>
       </div>
@@ -77,6 +77,18 @@
         <span class="unit-progress" id="unit-progress"></span>
       </div>
       <p class="hint" id="unit-hint" hidden>单元模式下：新词按单元顺序推进（像背单词书），复习仍按遗忘曲线全局调度</p>
+
+      <div id="setup-size-row" class="unit-row">
+        <span class="unit-label">⚔️ 本局词量</span>
+        <select id="setup-size" class="plan-select">
+          <option value="10" selected>10 词</option>
+          <option value="15">15 词</option>
+          <option value="20">20 词</option>
+          <option value="30">30 词</option>
+          <option value="50">50 词</option>
+        </select>
+        <span class="unit-progress" id="size-note">每关/每局的单词数量</span>
+      </div>
 
       <div id="setup-diff-wrap">
         <h3 class="section-title">🎚️ 难度</h3>

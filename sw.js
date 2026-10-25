@@ -1,6 +1,6 @@
 /* 单词大冒险 · Service Worker（网络优先，离线回落缓存） */
 'use strict';
-var CACHE = 'wq-cache-v12';
+var CACHE = 'wq-cache-v13';
 
 self.addEventListener('install', function (e) {
   e.waitUntil(
