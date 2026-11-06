@@ -10,5 +10,5 @@ echo   关闭此窗口即停止服务
 echo ============================================
 start "" http://localhost:8931
 cd /d "%~dp0"
-python -m http.server 8931 2>nul || py -m http.server 8931
+python server.py 8931 2>nul || py server.py 8931
 pause

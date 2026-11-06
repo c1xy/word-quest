@@ -12,6 +12,13 @@
 
 > 更新词库或代码后重新 `git push` 即可，玩家端刷新即得最新版（SW 网络优先策略）。
 
+## 🔄 发布更新清单（每次发新版都要做）
+
+1. `sw.js`：bump 顶部 `CACHE` 版本号（`wq-cache-v15` → `v16` …），旧缓存整体作废重建
+2. `index.html`：bump `style.css` / `words.js` / `game.js` 引用的 `?v=` 参数（与 CACHE 号同步）
+3. 正常发布。回访用户第一次刷新即拿到全新文件（sw.js 会对同源请求强制向服务器再验证；
+   新 SW 接管时页面自动刷新一次），不会出现「HTML/JS 新、CSS 旧」的混版渲染
+
 ## 方式二：Netlify Drop（不想用 Git）
 
 1. 打开 https://app.netlify.com/drop
@@ -20,10 +27,13 @@
 
 ## 方式三：电脑开热点/同 WiFi 局域网玩（无需注册）
 
-1. 双击 `启动本地服务.bat`（或在此目录运行 `python -m http.server 8931`）
+1. 双击 `启动本地服务.bat`（或在此目录运行 `python server.py 8931`）
 2. 手机浏览器访问 `http://电脑局域网IP:8931`（IP 用 `ipconfig` 查看 IPv4 地址）
 
 > 注意：局域网 http 不是安全上下文，手机端**离线缓存不可用**，仅在线玩；离线请用方式一/二。
+> 本目录的 `server.py` 与 `python -m http.server` 的区别：响应带 `Cache-Control: no-cache`，
+> 浏览器每次使用缓存前都向服务器再验证（未变更文件走 304 不重传），版本更新后刷新一次即全新；
+> 若改用 `python -m http.server`，启发式缓存可能在更新后的头几次访问里继续吐旧文件。
 
 ## 注意事项
 
