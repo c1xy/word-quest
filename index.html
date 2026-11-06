@@ -2,12 +2,29 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
 <title>单词大冒险 · 背单词小游戏</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚔️</text></svg>">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#7c5cff">
-<link rel="stylesheet" href="style.css">
+<script>
+/* PWA 版本更新自愈：版本更新后的首次加载，旧 Service Worker 服役期间的请求可能拿到过期样式
+   （SW 内 fetch 曾默认继承 HTTP 缓存模式，条目在启发式新鲜期内会绕过网络）。浏览器后台检测到
+   新 sw.js 并安装接管（skipWaiting + clients.claim）时会触发 controllerchange —— 此时自动整页
+   刷新一次，把首屏立即切到全新资源，用户无需手动再刷。
+   hadController 守卫：全新访客首次安装 SW 的接管不算更新，不误刷；
+   __wqSelfHealed 守卫：一个页面生命周期内最多自愈一次（刷新后的页面由新 SW 从头接管，不再触发）。 */
+(function () {
+  if (!('serviceWorker' in navigator)) return;
+  var hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', function () {
+    if (!hadController || window.__wqSelfHealed) return;
+    window.__wqSelfHealed = true;
+    location.reload();
+  });
+})();
+</script>
+<link rel="stylesheet" href="style.css?v=20261106a">
 </head>
 <body>
 <div id="app">
@@ -19,6 +36,7 @@
       <h1 class="logo">⚔️ 单词大冒险</h1>
       <p class="slogan">打怪 · 闯关 · 记单词</p>
       <div class="stat-chips">
+        <span class="chip">⭐ Lv.<b id="home-level">1</b></span>
         <span class="chip">🔥 连续打卡 <b id="home-streak">0</b> 天</span>
         <span class="chip">🪙 金币 <b id="home-coins">0</b></span>
         <span class="chip">📚 已掌握 <b id="home-mastered">0</b> 词</span>
@@ -46,6 +64,9 @@
         <button class="btn btn-big" id="btn-endless">
           ♾️ 无尽挑战<small>节奏越来越快，你能撑多远</small>
         </button>
+        <button class="btn btn-big" id="btn-expedition">
+          🚀 每日远征<small id="exp-sub">每日固定关卡 · 全员同题</small>
+        </button>
         <button class="btn btn-big" id="btn-review">
           📖 复习模式<small>专攻还没记住的词</small>
         </button>
@@ -56,7 +77,11 @@
       <div class="menu-row">
         <button class="btn btn-small btn-primary" id="btn-wrongbook">📕 错题本</button>
         <button class="btn btn-small" id="btn-codex">📖 单词图鉴</button>
+        <button class="btn btn-small" id="btn-poison">☠️ 挑战码</button>
         <button class="btn btn-small" id="btn-ach">🏆 成就</button>
+        <button class="btn btn-small" id="btn-talent">✨ 天赋</button>
+        <button class="btn btn-small" id="btn-packs">🧩 主题包</button>
+        <button class="btn btn-small" id="btn-lab">🧪 词根实验室</button>
         <button class="btn btn-small" id="btn-settings">⚙️ 设置</button>
         <button class="btn btn-small" id="btn-help">❓ 玩法说明</button>
       </div>
@@ -121,7 +146,12 @@
     <div class="timer-wrap"><div class="timer-fill" id="timer-fill"></div></div>
 
     <div class="pressure-wrap" id="pressure-wrap">
-      <span class="pressure-castle">🏰</span>
+      <span class="pressure-castle-wrap" id="pressure-castle-wrap">
+        <span class="pressure-castle">🏰</span>
+        <div class="castle-fx" id="castle-fx" aria-hidden="true">
+          <i class="castle-crack c1"></i><i class="castle-crack c2"></i><i class="castle-crack c3"></i>
+        </div>
+      </span>
       <div class="pressure-bar" id="pressure-bar">
         <div class="pressure-fill" id="pressure-fill"></div>
         <span class="pressure-army" id="pressure-army">👹</span>
@@ -137,7 +167,11 @@
           <span class="monster-name" id="monster-name">小幽灵</span>
           <div class="boss-mod" id="boss-mod" hidden></div>
         </div>
-        <div class="monster-emoji" id="monster-emoji">👻</div>
+        <div class="monster-figure" id="monster-figure" title="⚡ 点击怪物：蓄力一击！">
+          <canvas class="monster-aura" id="monster-aura" aria-hidden="true"></canvas>
+          <div class="monster-emoji" id="monster-emoji">👻</div>
+        </div>
+        <div class="monster-rune" id="monster-rune" hidden></div>
         <div class="monster-queue" id="monster-queue"></div>
       </div>
 
@@ -176,6 +210,7 @@
       </div>
 
       <div class="q-tools">
+        <button class="btn btn-tiny charge-btn" id="btn-charge" hidden title="点击怪物或此按钮：蓄力一击"><span class="cg-full">⚡ 蓄力一击</span><span class="cg-mini">⚡</span></button>
         <button class="btn btn-tiny" id="btn-memo" hidden>🔍 记忆提示</button>
         <button class="btn btn-tiny" id="btn-hint" hidden>💡 五五开 (<span id="hint-count">0</span>)</button>
       </div>
@@ -208,10 +243,13 @@
     <div class="panel">
       <h2 class="panel-title" id="result-title">⚔️ 冒险结束</h2>
       <div class="result-stats" id="result-stats"></div>
+      <canvas id="result-canvas" hidden></canvas>
       <h3 class="section-title">📜 本局单词回顾</h3>
       <div class="result-words" id="result-words"></div>
       <div class="setup-actions">
         <button class="btn btn-primary" id="btn-retry-wrong" hidden>🔁 再战错词</button>
+        <button class="btn" id="btn-poison-export">⚔️ 投毒</button>
+        <button class="btn btn-primary" id="btn-result-code" hidden>📨 复制成绩码</button>
         <button class="btn" id="btn-again">🔄 再来一局</button>
         <button class="btn" id="btn-result-home">🏠 回主页</button>
       </div>
@@ -273,7 +311,7 @@
   <section class="screen" id="scr-match">
     <div class="panel wide">
       <h2 class="panel-title">🃏 记忆配对</h2>
-      <p class="hint">翻开卡片，把单词和它的释义配成一对，越快越准奖励越多！</p>
+      <p class="hint">点击翻牌，或直接<b>拖拽卡片</b>撞向它的另一半！把单词和释义配成一对，越快越准奖励越多。</p>
       <div class="match-stats">
         <span class="chip" id="match-moves">👟 步数 0</span>
         <span class="chip" id="match-time">⏱ 0 秒</span>
@@ -287,6 +325,42 @@
     </div>
   </section>
 
+  <!-- ============ 词根合成实验室 ============ -->
+  <section class="screen" id="scr-lab">
+    <div class="panel">
+      <h2 class="panel-title">🧪 词根合成实验室 <span class="coin-badge" id="lab-score">0 分</span></h2>
+      <div id="lab-intro">
+        <p class="hint">把单词拆成零件：<b>前缀</b>管方向、<b>词根</b>管核心含义、<b>后缀</b>定词性。看懂零件，生词也能猜出七八分。<br>🔍 <b>拆解挑战</b>——选出单词里真正的词根；⚗️ <b>合成挑战</b>——看零件拼出单词（合成题作答会计入学习进度）。</p>
+      </div>
+      <div class="match-stats">
+        <span class="chip" id="lab-round">🧪 第 1/10 题</span>
+        <span class="chip" id="lab-streak">🔥 连对 0</span>
+        <span class="chip" id="lab-ok">✅ 答对 0</span>
+      </div>
+      <div id="lab-play" hidden>
+        <div class="lab-kind" id="lab-kind">🔍 拆解挑战</div>
+        <div class="lab-word" id="lab-word">word</div>
+        <div class="lab-mean" id="lab-mean">释义</div>
+        <div class="lab-pieces" id="lab-pieces" hidden></div>
+        <div class="q-options lab-opts" id="lab-opts"></div>
+        <div class="lab-feedback" id="lab-feedback" hidden></div>
+        <div class="setup-actions">
+          <button class="btn btn-primary btn-small" id="btn-lab-next" hidden>➡️ 下一题</button>
+        </div>
+      </div>
+      <div id="lab-done" hidden>
+        <p class="lab-done-text" id="lab-done-text"></p>
+        <div class="setup-actions">
+          <button class="btn btn-primary btn-small" id="btn-lab-again">🔄 再来一轮</button>
+        </div>
+      </div>
+      <div class="setup-actions">
+        <button class="btn btn-small" id="btn-lab-back">← 返回</button>
+        <button class="btn btn-primary btn-big" id="btn-lab-start">🚪 进入实验室</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ 成就 ============ -->
   <section class="screen" id="scr-ach">
     <div class="panel wide">
@@ -295,6 +369,34 @@
       <p class="hint">每个成就解锁奖励 20 金币</p>
       <div class="setup-actions">
         <button class="btn btn-small" id="btn-ach-back">← 返回</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 天赋 ============ -->
+  <section class="screen" id="scr-talent">
+    <div class="panel wide">
+      <h2 class="panel-title">✨ 天赋殿堂 <span class="coin-badge">⭐ Lv.<b id="talent-lv">1</b></span></h2>
+      <div class="talent-head">
+        <span class="chip">💠 可用天赋点 <b id="talent-pts">0</b></span>
+        <span class="chip" id="talent-xp-text">0 / 60 EXP</span>
+      </div>
+      <div class="xp-bar"><div class="xp-fill" id="xp-fill" style="width:0%"></div></div>
+      <p class="hint">答题、击杀、通关都会获得经验；每升 1 级得 1 天赋点，天赋永久生效、所有模式通用</p>
+      <div class="talent-grid" id="talent-grid"></div>
+      <div class="setup-actions">
+        <button class="btn btn-small" id="btn-talent-back">← 返回</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 主题挑战包 ============ -->
+  <section class="screen" id="scr-packs">
+    <div class="panel">
+      <h2 class="panel-title">🧩 主题挑战包</h2>
+      <div id="pack-list"></div>
+      <div class="setup-actions">
+        <button class="btn btn-small" id="btn-packs-back">← 返回</button>
       </div>
     </div>
   </section>
@@ -325,6 +427,7 @@
       <label class="setting-row"><span>👂 听音题（听发音选词）<i id="tts-note" class="hint-inline"></i></span><input type="checkbox" id="qt-listen" checked></label>
 
       <div class="setup-actions">
+        <button class="btn btn-small" id="btn-poison-set">☠️ 挑战码</button>
         <button class="btn btn-small" id="btn-export">📤 导出存档</button>
         <button class="btn btn-small" id="btn-import">📥 导入存档</button>
         <button class="btn btn-small danger" id="btn-reset">🗑️ 重置全部进度</button>
@@ -345,7 +448,16 @@
         <p><b>⭐ 掌握度是什么？</b>每个词 0~5 星：答对 +1 星，答错 -1 星。星级越高，这个词出现得越少；低星词和易错词会优先出现（这就是「间隔重复」）。集满 5 星 = 已掌握。</p>
         <p><b>🪙 金币怎么用？</b>答题和连击赚金币，过关后到商店买药水、护盾、提示卡，或购买永久强化（血量上限、答题时限、初始护盾、金币加成）。</p>
         <p><b>📖 复习模式</b>不扣血、没压力，专门刷低掌握度和易错的词，适合考前突击。</p>
-        <p><b>⌨️ 小技巧</b>选择题可按键盘 <b>1 2 3 4</b> 作答；拼写题可直接敲键盘字母——<b>中文输入法状态下也能用</b>（游戏按物理键位识别），若个别按键仍无反应，可切换到英文输入法。</p>
+        <p><b>☠️ 投毒挑战码</b>结算页点「⚔️ 投毒」，把本场的复仇怪物（答错 2 次的词）、你的易混淆词对和 1 条随机 BOSS 词缀压成一个 12-18 位挑战码，发给好友。好友在主页/设置点「☠️ 挑战码」粘贴应战，进入噩梦毒池：<b>出题者对该词掌握度越低，怪物越硬</b>，干扰项还会优先出现你布下的混淆词。打完生成「📨 成绩码」回贴给出题者，双方本地都会记下战绩（谁毒倒了谁）——全程不需要联网。</p>
+        <p><b>⚠️ BOSS 词缀</b>冒险每 5 关的 BOSS、每日远征的精英/BOSS 关和毒池挑战都会随机携带词缀（共 14 条）：⏱️ 时间压缩、💢 狂暴、🌵 荆棘、🧲 汲取，以及更凶的 🥶 时停（偷走 4 秒）、💰 贪婪（金币 +50% 但敌军持续推进）、🪨 石肤（护盾挡一次伤害）、🔕 沉默（封印记忆提示与提示卡）、🌊 狂潮（攻势每题 +1%）、🧟 不死（击倒后爬起来再战）、🥀 贫瘠（金币收益减半）、🎭 诅咒（连击封顶 3 连）、🌫️ 迷雾（开题前 2 秒选项隐身）、🔮 妖印（蓄力一击被封印）——看到徽章先读效果再作答！遭遇过的词缀都会记进「词缀图鉴」成就。</p>
+        <p><b>✨ 天赋系统</b>答题、击杀、通关都能获得经验（EXP），升级得天赋点。主界面点「✨ 天赋」加点：🛡️ 钢铁城墙、⏳ 从容不迫、🪙 财富磁石、🧰 战地抢修、🔥 连击之魂、💡 智者启示、🕯️ 不灭意志（城破续命一次）、📖 学者天赋、🎯 缓兵之计、🐉 屠龙蓄能、⚡ 蓄雷一击（每答对 6 题伤害翻倍）、🧾 行囊议价——12 项永久被动，所有模式通用。</p>
+        <p><b>🧩 主题挑战包</b>主界面点「🧩 主题包」：「词根家族」把同根词一串串打包集中攻克，「易混淆对」把形近词和变位词成对塞进同一局，「⚡ 高频核心 500」精选考试最爱考的核心词，「🎓 学术词族」专攻论文场景高频词（与高频核心包不重复）。挑战按冒险规则进行（BOSS、词缀、商店都在），学习进度与星级照常写回；每完成一个不同的主题包，「包罗万象」成就就前进一格。</p>
+        <p><b>🚀 每日远征</b>主页点「🚀 每日远征」：词池和词缀都由当天日期作种——<b>同一天所有玩家遇到同一批 20 个词、同一条词缀 schedule</b>，第二天自动换一副面孔。三关连打：迎击 8 只 → 精英 10 只（整关挂当日词缀 A，先读横幅再开打）→ BOSS 决战（挂当日词缀 B）。积分 = 击杀×10 + 答对×2 + 最高连击×5 + 通关 100；当日首通额外奖 80🪙，之后可以反复挑战刷当日最高分（城防规则照常，阵亡即远征失败）。</p>
+        <p><b>🧪 词根合成实验室</b>主页功能键「🧪 词根实验室」：10 题一轮，随机混合两种题型——🔍 <b>拆解挑战</b>（给出单词和释义，选出它真正的词根，如 transport 里的 port=携带）和 ⚗️ <b>合成挑战</b>（给出 re-(再次) + spect(看) 这样的零件，选出拼出的那个单词）。答对得金币与经验，连对每满 5 额外 +5🪙，10 题全对再奖 20🪙；合成题本质上是一次「看拆解认词」的复习，<b>作答会照常写入掌握度与间隔重复</b>，拆解题只练眼力不记进度。</p>
+        <p><b>⚡ 蓄力一击</b>战斗中<b>点一下怪物</b>（或题目下方「⚡」按钮）开始蓄力，约 1 秒后自动释放：怪物掉 1 血（先打碎石肤护盾；天赋「蓄雷一击」让蓄力伤害翻倍）；怪物只剩 1 血时改为<b>震慑</b>——击退敌军压境（「连击之魂」增强击退），对 BOSS 释放还能吃到「屠龙蓄能」金币加成。每题限一次，蓄力期间答题计时照常走，权衡好出手时机！</p>
+        <p><b>🃏 记忆配对手感</b>卡片可以点击翻转，也可以<b>按住拖拽</b>——把单词卡直接撞向它的释义卡（或反过来）一击配对；拖错了对方会亮出来 0.7 秒再弹回，顺便也认了个脸熟。</p>
+        <p><b>🏰 城防读脸</b>敌军压境条越满，城堡裂纹越多、火光越旺——看到城堡烧起来就该拼命答题了！每只怪物的光环颜色代表出题词的<b>词性</b>（金=名词、红=动词、紫=形容词、青=副词），头顶的角越多血越厚；答完题怪物脚下会亮出这个词的<b>词根符文</b>。</p>
+        <p><b>⌨️ 小技巧</b>选择题可按键盘 <b>1 2 3 4</b> 作答（词根实验室同样适用）；拼写题可直接敲键盘字母——<b>中文输入法状态下也能用</b>（游戏按物理键位识别），若个别按键仍无反应，可切换到英文输入法。</p>
         <p><b>🔥 连续打卡</b>每天答题就会累计，中断会清零，坚持就是胜利！</p>
       </div>
       <div class="setup-actions">
@@ -396,7 +508,8 @@
   <div class="overlay" id="io-overlay" hidden>
     <div class="memcard-box io-box">
       <div class="memcard-tag" id="io-title">📤 导出存档</div>
-      <textarea id="io-text" spellcheck="false"></textarea>
+      <textarea id="io-text" spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
+      <div id="io-poison-log" class="io-poison-log" hidden></div>
       <div class="spell-actions">
         <button class="btn btn-tiny" id="io-copy">📋 复制</button>
         <button class="btn btn-primary btn-tiny" id="io-ok">确定</button>
@@ -410,7 +523,7 @@
 
 </div>
 
-<script src="words.js"></script>
-<script src="game.js"></script>
+<script src="words.js?v=20261106a"></script>
+<script src="game.js?v=20261106a"></script>
 </body>
 </html>

@@ -37,16 +37,25 @@ function defaultSave() {
     ach: {},
     pets: {},
     pet: '',
-    stats: { kills: 0, bosses: 0, spellOk: 0, listenOk: 0, runs: 0, dailyDone: 0, maxCombo: 0, perfects: 0 },
+    stats: { kills: 0, bosses: 0, spellOk: 0, listenOk: 0, runs: 0, dailyDone: 0, maxCombo: 0, perfects: 0, packDone: 0,
+      labN: 0, labOk: 0, expWins: 0, packDoneMap: {} },   /* 词根实验室 / 每日远征 / 各主题包完成档案 */
+    expedition: { date: '', best: 0, clearDate: '' },   /* 每日远征：当日最高分与首通日期 */
+    modsSeen: {},         /* 已遭遇过的 BOSS 词缀档案（成就「词缀图鉴」） */
     plan: { target: 10 },
     planDay: { date: '', done: 0, total: 0, complete: false },
     dailyLog: {},
     confuse: {},
+    xp: 0,               // 玩家经验（答题/击杀/通关获得）
+    level: 1,            // 玩家等级
+    talentPts: 0,        // 可用天赋点（每次升级 +1）
+    talents: {},         // talentId -> 等级（0 起未解锁）
     unit: {},            // listId -> 当前单元索引（0 起）
     unitMode: 'none',    // none | auto | 单元号(1起)
     unitList: 'cet4',
     wrongBook: {},       // word -> { n: 答错次数, t: 最近答错时间 }
-    sessionSize: 10      // 本局词量（每关怪物数 / 复习总题数）
+    sessionSize: 10,     // 本局词量（每关怪物数 / 复习总题数）
+    poisonLog: [],       // 投毒战绩（谁毒倒了谁）：{ role:'set'|'play', words, cleared, total, win, t }
+    poisonIssued: null   // 最近一次发出的挑战码内容，用于核对回贴的成绩码
   };
 }
 
@@ -56,7 +65,7 @@ function loadSave() {
     if (!raw) return defaultSave();
     var d = defaultSave();
     var s = JSON.parse(raw);
-    ['coins', 'mastery', 'customLists', 'lastLists', 'lastDiff'].forEach(function (k) {
+    ['coins', 'mastery', 'customLists', 'lastLists', 'lastDiff', 'poisonIssued', 'poisonLog', 'xp', 'level', 'talentPts', 'talents', 'expedition', 'modsSeen'].forEach(function (k) {
       if (s[k] !== undefined) d[k] = s[k];
     });
     ['upgrades', 'streak', 'best', 'settings', 'daily', 'ach', 'pets', 'stats', 'plan', 'planDay', 'dailyLog', 'confuse', 'unit', 'wrongBook', 'sessionSize'].forEach(function (k) {
@@ -304,13 +313,30 @@ var THEMES = [
     ['魔王城堡的大门缓缓开启…', '王座厅传来阴森的回响。', '最终的决战，就在眼前！']]
 ];
 
-/* Boss 随机词缀 */
+/* Boss 随机词缀（前 4 条为挑战码 v1 兼容位，勿改顺序；新词缀只能追加在后。
+   v2 编码容量：下标 i 的混合值 i*12+11，14 条最大 13*12+11=167 < 256，无需再扩格式） */
 var BOSS_MODS = {
   haste: { icon: '⏱️', name: '时间压缩', desc: '答题时间 -25%' },
   rage:  { icon: '💢', name: '狂暴',     desc: '它的攻击伤害 +3' },
   thorn: { icon: '🌵', name: '荆棘',     desc: '答错额外受 1 点伤害' },
-  drain: { icon: '🧲', name: '汲取',     desc: '你答错时它会回血' }
+  drain: { icon: '🧲', name: '汲取',     desc: '你答错时它会回血' },
+  freeze:{ icon: '🥶', name: '时停',     desc: '开题瞬间偷走你 4 秒' },
+  greed: { icon: '💰', name: '贪婪',     desc: '金币 +50%，但你每答 1 题敌军压境 +2%' },
+  ward:  { icon: '🪨', name: '石肤',     desc: '怪物有石肤护盾，抵挡第一次伤害' },
+  silence:{ icon: '🔕', name: '沉默',    desc: '记忆提示与提示卡被封印' },
+  tide:  { icon: '🌊', name: '狂潮',     desc: '敌军攻势每答 1 题 +1%（最多 +15%）' },
+  molt:  { icon: '🧟', name: '不死',     desc: '每只怪第一次被击倒时会以 1 血爬起来' },
+  famine:{ icon: '🥀', name: '贫瘠',     desc: '本场金币收益减半' },
+  curse: { icon: '🎭', name: '诅咒',     desc: '连击封顶 3 连（热浪与爆发全部失效）' },
+  fog:   { icon: '🌫️', name: '迷雾',     desc: '开题前 2 秒选项隐于迷雾，雾散才能看清' },
+  hex:   { icon: '🔮', name: '妖印',     desc: '蓄力一击被封印，只能靠答题输出' }
 };
+/* 新遭遇的词缀记入档案（成就「词缀图鉴」用） */
+function markModSeen(m) {
+  if (!m) return;
+  if (!save.modsSeen) save.modsSeen = {};
+  if (!save.modsSeen[m]) { save.modsSeen[m] = 1; persist(); }
+}
 
 /* 宠物 */
 var PETS = [
@@ -355,7 +381,9 @@ var TASK_DEFS = [
   { id: 'combo_hit',  icon: '🔥', txt: '达成 8 连击',          goal: 8,  reward: 30 },
   { id: 'run_any',    icon: '🏁', txt: '完成 1 局游戏',        goal: 1,  reward: 20 },
   { id: 'review_done',icon: '📖', txt: '完成 1 次复习模式',    goal: 1,  reward: 25 },
-  { id: 'new_words',  icon: '🌱', txt: '遇到 8 个新单词',      goal: 8,  reward: 30 }
+  { id: 'new_words',  icon: '🌱', txt: '遇到 8 个新单词',      goal: 8,  reward: 30 },
+  { id: 'lab_ok',     icon: '🧪', txt: '词根实验室答对 5 题',  goal: 5,  reward: 20 },
+  { id: 'exp_kill',   icon: '🚀', txt: '每日远征击破 10 名敌军', goal: 10, reward: 35 }
 ];
 function taskDef(id) {
   var f = null;
@@ -460,7 +488,16 @@ var ACH = [
   ['streak7',     '🏅', '七日之约', '连续打卡 7 天'],
   ['rich',        '🪙', '小金库',   '同时持有 500 金币'],
   ['daily5',      '📋', '日课达人', '完成 5 个每日任务'],
-  ['pet1',        '🐣', '宠物之家', '获得一只宠物']
+  ['pet1',        '🐣', '宠物之家', '获得一只宠物'],
+  ['lv5',         '⭐', '崭露头角', '玩家等级达到 Lv.5'],
+  ['talent5',     '✨', '天赋异禀', '累计学习 5 级天赋'],
+  ['poison_set',  '☠️', '投毒新手', '第一次发出挑战码'],
+  ['poison_win',  '🗡️', '毒池生还', '通关一次噩梦毒池'],
+  ['pack1',       '🧩', '主题挑战者', '主题挑战包通过第 1 关'],
+  ['packs3',      '🎒', '包罗万象', '完成 3 个不同的主题挑战包'],
+  ['exp1',        '🚀', '远征先锋', '通关一次每日远征'],
+  ['lab30',       '🧪', '词根炼金师', '词根实验室累计答对 30 题'],
+  ['mod_all',     '👁️', '词缀图鉴', '遭遇过全部 ' + Object.keys(BOSS_MODS).length + ' 种 BOSS 词缀']
 ];
 function masteredCount() {
   var n = 0;
@@ -495,6 +532,94 @@ function checkAch() {
   if (save.coins >= 500) unlockAch('rich');
   if (save.stats.dailyDone >= 5) unlockAch('daily5');
   if (Object.keys(save.pets).length >= 1) unlockAch('pet1');
+  if (save.level >= 5) unlockAch('lv5');
+  if (talentRankSum() >= 5) unlockAch('talent5');
+  if ((save.poisonLog || []).some(function (e) { return e.role === 'set'; })) unlockAch('poison_set');
+  if ((save.poisonLog || []).some(function (e) { return e.role === 'play' && e.win; })) unlockAch('poison_win');
+  if ((save.stats.packDone || 0) >= 1) unlockAch('pack1');
+  if (Object.keys(save.stats.packDoneMap || {}).length >= 3) unlockAch('packs3');
+  if ((save.stats.expWins || 0) >= 1) unlockAch('exp1');
+  if ((save.stats.labOk || 0) >= 30) unlockAch('lab30');
+  if (Object.keys(save.modsSeen || {}).length >= Object.keys(BOSS_MODS).length) unlockAch('mod_all');
+}
+
+/* ========================= 玩家等级 & 天赋 =========================
+   经验来自所有出题模式（答对/击杀/通关），升级 +1 天赋点；
+   天赋为永久被动，各模式通用，写入 save.talents（旧存档缺字段自动取默认） */
+var TALENTS = [
+  { id: 'vigor',   icon: '🛡️', name: '钢铁城墙', desc: '敌军攻势 -5% / 级', max: 3 },
+  { id: 'calm',    icon: '⏳', name: '从容不迫', desc: '每题答题时间 +1 秒 / 级', max: 2 },
+  { id: 'magnet',  icon: '🪙', name: '财富磁石', desc: '金币获取 +10% / 级', max: 3 },
+  { id: 'medic',   icon: '🧰', name: '战地抢修', desc: '每关开始压境值 -3% / 级', max: 2 },
+  { id: 'soul',    icon: '🔥', name: '连击之魂', desc: '答对击退敌军的效果 +10% / 级', max: 2 },
+  { id: 'sage',    icon: '💡', name: '智者启示', desc: '每局开局自带提示卡 +1 / 级', max: 2 },
+  { id: 'will',    icon: '🕯️', name: '不灭意志', desc: '城破时续命一次：压境回落到 70%', max: 1 },
+  { id: 'scholar', icon: '📖', name: '学者天赋', desc: '获得经验 +20% / 级', max: 3 },
+  { id: 'focus',   icon: '🎯', name: '缓兵之计', desc: '复仇怪兽延后 2 题 / 级', max: 2 },
+  { id: 'slayer',  icon: '🐉', name: '屠龙蓄能', desc: '击败 BOSS 金币 +25% / 级', max: 2 },
+  { id: 'smite',   icon: '⚡', name: '蓄雷一击', desc: '每答对 6 题，下一击伤害翻倍', max: 1 },
+  { id: 'haggle',  icon: '🧾', name: '行囊议价', desc: '商店补给价格 -15% / 级', max: 2 }
+];
+function talentLv(id) { return (save.talents && save.talents[id]) || 0; }
+function xpNeed(lv) { return 60 + (lv - 1) * 45; }
+function addXp(n) {
+  save.xp += Math.round(n * (1 + 0.2 * talentLv('scholar')));
+  var up = false;
+  while (save.xp >= xpNeed(save.level)) {
+    save.xp -= xpNeed(save.level);
+    save.level++;
+    save.talentPts++;
+    up = true;
+  }
+  if (up) {
+    toast('⭐ 等级提升！Lv.' + save.level + ' · 获得 1 天赋点（主界面「✨ 天赋」加点）');
+    Confetti.burst(50);
+    Sfx.levelup();
+  }
+}
+function talentRankSum() {
+  var n = 0;
+  TALENTS.forEach(function (t) { n += talentLv(t.id); });
+  return n;
+}
+function openTalent() {
+  showScreen('scr-talent');
+  renderTalent();
+}
+function renderTalent() {
+  $('talent-lv').textContent = save.level;
+  $('talent-pts').textContent = save.talentPts;
+  var need = xpNeed(save.level);
+  $('talent-xp-text').textContent = save.xp + ' / ' + need + ' EXP';
+  $('xp-fill').style.width = Math.min(100, save.xp / need * 100) + '%';
+  var html = '';
+  TALENTS.forEach(function (t) {
+    var lv = talentLv(t.id);
+    var maxed = lv >= t.max;
+    html += '<div class="talent-item' + (maxed ? ' maxed' : '') + '">' +
+      '<div class="talent-icon">' + t.icon + '</div>' +
+      '<div class="talent-name">' + t.name + '</div>' +
+      '<div class="talent-rank">' + '◆'.repeat(lv) + '◇'.repeat(t.max - lv) + '</div>' +
+      '<div class="talent-desc">' + t.desc + '</div>' +
+      '<button class="btn btn-tiny btn-primary talent-buy" data-t="' + t.id + '"' +
+      (maxed || save.talentPts <= 0 ? ' disabled' : '') + '>' +
+      (maxed ? '已满级' : (lv > 0 ? '升一级' : '解锁')) + '</button></div>';
+  });
+  $('talent-grid').innerHTML = html;
+}
+function buyTalent(id) {
+  var t = null;
+  TALENTS.forEach(function (x) { if (x.id === id) t = x; });
+  if (!t) return;
+  var lv = talentLv(id);
+  if (lv >= t.max || save.talentPts <= 0) return;
+  save.talentPts--;
+  save.talents[id] = lv + 1;
+  Sfx.levelup();
+  toast('✨ ' + t.name + ' ' + (lv + 1 > 1 ? 'Lv.' + (lv + 1) : '解锁') + '！');
+  persist();
+  renderTalent();
+  refreshHome();
 }
 function openAch() {
   showScreen('scr-ach');
@@ -545,22 +670,24 @@ var Confetti = {
     this.cv.width = window.innerWidth;
     this.cv.height = window.innerHeight;
   },
-  burst: function (n) {
+  burst: function (n, ox, oy) {
     try {
       this.ensure();
       var W = this.cv.width, H = this.cv.height;
+      var at = (ox !== undefined && oy !== undefined);
+      var spread = at ? 60 : 120;
       for (var i = 0; i < (n || 60); i++) {
         this.parts.push({
-          x: W / 2 + (Math.random() - 0.5) * 120,
-          y: H * 0.35,
-          vx: (Math.random() - 0.5) * 16,
-          vy: -(5 + Math.random() * 9),
+          x: at ? ox : W / 2 + (Math.random() - 0.5) * spread,
+          y: at ? oy : H * 0.35,
+          vx: (Math.random() - 0.5) * (at ? 11 : 16),
+          vy: -(4 + Math.random() * (at ? 7 : 9)),
           g: 0.35,
           s: 5 + Math.random() * 7,
           c: this.COLORS[Math.floor(Math.random() * this.COLORS.length)],
           r: Math.random() * Math.PI,
           vr: (Math.random() - 0.5) * 0.3,
-          life: 70 + Math.random() * 50
+          life: (at ? 45 : 70) + Math.random() * 50
         });
       }
       if (!this.raf) this.loop();
@@ -592,12 +719,366 @@ var Confetti = {
   }
 };
 
-function shakeApp() {
+function shakeApp(small) {
   var a = $('app');
-  a.classList.remove('shake');
+  var cls = small ? 'shake-sm' : 'shake';
+  a.classList.remove('shake', 'shake-sm');
   void a.offsetWidth;
-  a.classList.add('shake');
-  setTimeout(function () { a.classList.remove('shake'); }, 450);
+  a.classList.add(cls);
+  setTimeout(function () { a.classList.remove(cls); }, small ? 260 : 450);
+}
+
+/* ========================= 战斗视觉表现（怪物形象化 / 城防受击 / 蓄力一击） =========================
+   原则：canvas 只在怪物刷新/受击时重绘一帧静态光环，动效全交给 CSS（transform/opacity），
+   不新增常驻 rAF 循环，保证答题循环 60fps 与可作理性。 */
+
+/* 词性 → 光环：金=名词盾环 / 红=动词火环 / 紫=形容词星芒 / 青=副词电弧 / 灰=其它尘埃环 */
+var POS_AURA = {
+  n:    { c: '#ffd166', kind: 'hex' },
+  v:    { c: '#ff5d73', kind: 'flame' },
+  adj:  { c: '#b48bff', kind: 'star' },
+  adv:  { c: '#7ce8ff', kind: 'bolt' },
+  prep: { c: '#8df0c2', kind: 'dust' },
+  conj: { c: '#8df0c2', kind: 'dust' },
+  pron: { c: '#8df0c2', kind: 'dust' }
+};
+
+function hexRing(c, cx, cy, R) {
+  var i, a;
+  c.beginPath();
+  for (i = 0; i <= 6; i++) {
+    a = i / 6 * Math.PI * 2 - Math.PI / 2;
+    if (i === 0) c.moveTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+    else c.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+  }
+  c.stroke();
+  for (i = 0; i < 6; i++) {
+    a = i / 6 * Math.PI * 2 - Math.PI / 2;
+    c.beginPath();
+    c.arc(cx + Math.cos(a) * R * 1.14, cy + Math.sin(a) * R * 1.14, Math.max(1.5, R * 0.055), 0, Math.PI * 2);
+    c.fillStyle = c.strokeStyle;
+    c.fill();
+  }
+}
+function flameRing(c, cx, cy, R, col, n) {
+  c.fillStyle = col;
+  for (var i = 0; i < n; i++) {
+    var a0 = i / n * Math.PI * 2;
+    var half = Math.PI / n * 0.62;
+    c.beginPath();
+    c.moveTo(cx + Math.cos(a0 - half) * R, cy + Math.sin(a0 - half) * R);
+    c.lineTo(cx + Math.cos(a0) * R * 1.2, cy + Math.sin(a0) * R * 1.2);
+    c.lineTo(cx + Math.cos(a0 + half) * R, cy + Math.sin(a0 + half) * R);
+    c.closePath();
+    c.fill();
+  }
+  c.beginPath(); c.arc(cx, cy, R, 0, Math.PI * 2); c.stroke();
+}
+function starRing(c, cx, cy, R, col) {
+  c.fillStyle = col;
+  for (var i = 0; i < 8; i++) {
+    var a0 = i / 8 * Math.PI * 2 - Math.PI / 2;
+    var L = (i % 2 === 0) ? 1.22 : 1.08;
+    var half = (i % 2 === 0) ? 0.14 : 0.1;
+    c.beginPath();
+    c.moveTo(cx + Math.cos(a0 - half) * R, cy + Math.sin(a0 - half) * R);
+    c.lineTo(cx + Math.cos(a0) * R * L, cy + Math.sin(a0) * R * L);
+    c.lineTo(cx + Math.cos(a0 + half) * R, cy + Math.sin(a0 + half) * R);
+    c.closePath();
+    c.fill();
+  }
+  c.setLineDash([2, 7]);
+  c.beginPath(); c.arc(cx, cy, R * 0.86, 0, Math.PI * 2); c.stroke();
+  c.setLineDash([]);
+}
+function boltRing(c, cx, cy, R, col) {
+  var seg = Math.PI * 0.44;
+  for (var i = 0; i < 3; i++) {
+    var a0 = i * (Math.PI * 2 / 3) - Math.PI / 2;
+    c.beginPath();
+    c.arc(cx, cy, R, a0, a0 + seg);
+    c.stroke();
+    c.beginPath();
+    for (var s = 0; s <= 5; s++) {
+      var aa = a0 + (s / 5) * seg;
+      var rr = R * (s % 2 === 0 ? 1.14 : 0.9);
+      if (s === 0) c.moveTo(cx + Math.cos(aa) * rr, cy + Math.sin(aa) * rr);
+      else c.lineTo(cx + Math.cos(aa) * rr, cy + Math.sin(aa) * rr);
+    }
+    c.stroke();
+  }
+}
+function dustRing(c, cx, cy, R, col) {
+  c.fillStyle = col;
+  for (var i = 0; i < 12; i++) {
+    var a = i / 12 * Math.PI * 2;
+    c.beginPath();
+    c.arc(cx + Math.cos(a) * R, cy + Math.sin(a) * R, Math.max(1.5, R * 0.05), 0, Math.PI * 2);
+    c.fill();
+  }
+}
+
+/* 当前怪物的形象参数（由出题词的词性/掌握度 + 怪物血量决定） */
+function monsterTraitOpts() {
+  if (!run || !run.monster) return null;
+  var word = run.q ? run.q.word : null;
+  return {
+    boss: run.monster.boss,
+    hp: run.monster.hp,
+    pos: word ? posOf(word.m) : '',
+    lv: word ? ((save.mastery[word.w] || {}).lv || 0) : 0
+  };
+}
+
+function paintMonsterVisual(o) {
+  var cv = $('monster-aura'), emoji = $('monster-emoji');
+  if (!cv || !emoji) return;
+  if (!o) { cv.width = 0; return; }
+  var F = parseFloat(getComputedStyle(emoji).fontSize) || 64;
+  var S = Math.round(F * (o.boss ? 2.5 : 2.1));
+  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.style.width = S + 'px';
+  cv.style.height = S + 'px';
+  cv.width = Math.round(S * dpr);
+  cv.height = Math.round(S * dpr);
+  var c = cv.getContext('2d');
+  if (!c) return;
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, S, S);
+  var cx = S / 2, cy = S / 2, R = S * 0.44;
+  var aura = o.boss ? null : (POS_AURA[o.pos] || null);
+  var col = o.boss ? '#ff5d73' : (aura ? aura.c : 'rgba(255,255,255,.55)');
+  var alpha = o.lv >= 4 ? 0.5 : (o.lv <= 1 ? 1 : 0.8);
+  c.globalAlpha = alpha;
+  c.strokeStyle = col;
+  c.lineWidth = Math.max(2, S * 0.032);
+  c.lineCap = 'round';
+  var kind = o.boss ? 'boss' : (aura ? aura.kind : 'dust');
+  if (kind === 'boss') { flameRing(c, cx, cy, R, '#ff5d73', 14); c.strokeStyle = '#ffd166'; flameRing(c, cx, cy, R * 0.78, '#ffd166', 9); }
+  else if (kind === 'hex') hexRing(c, cx, cy, R);
+  else if (kind === 'flame') flameRing(c, cx, cy, R, col, 12);
+  else if (kind === 'star') starRing(c, cx, cy, R, col);
+  else if (kind === 'bolt') boltRing(c, cx, cy, R, col);
+  else dustRing(c, cx, cy, R, col);
+  /* 危险红晕：新词 / 弱项（lv≤1），提醒玩家这题别大意 */
+  if (!o.boss && o.lv <= 1) {
+    c.globalAlpha = 0.4;
+    c.strokeStyle = '#ff5d73';
+    c.setLineDash([4, 6]);
+    c.beginPath(); c.arc(cx, cy, R * 1.18, 0, Math.PI * 2); c.stroke();
+    c.setLineDash([]);
+  }
+  /* 难度之角：血量越厚角越多（2 血 2 角，3+ 血 4 角） */
+  c.globalAlpha = alpha;
+  var horns = o.hp >= 3 ? 4 : (o.hp === 2 ? 2 : 0);
+  for (var h = 0; h < horns; h++) {
+    var ang = -Math.PI / 2 + (h < 2 ? (h === 0 ? -0.5 : 0.5) : (h === 2 ? -0.95 : 0.95));
+    var bx = cx + Math.cos(ang) * R * 0.9, by = cy + Math.sin(ang) * R * 0.9;
+    var tx = cx + Math.cos(ang) * R * 1.26, ty = cy + Math.sin(ang) * R * 1.26;
+    var px = Math.cos(ang + Math.PI / 2) * S * 0.05;
+    var py = Math.sin(ang + Math.PI / 2) * S * 0.05;
+    c.beginPath();
+    c.moveTo(bx + px, by + py);
+    c.lineTo(tx, ty);
+    c.lineTo(bx - px, by - py);
+    c.closePath();
+    c.fillStyle = o.boss ? '#ffd166' : col;
+    c.fill();
+  }
+  c.globalAlpha = 1;
+}
+
+/* 答完题后亮出词根符文（答题前显示会泄题底，答完展示帮助记忆） */
+function revealRune(word) {
+  var el = $('monster-rune');
+  if (!el || !word) return;
+  var p = parseCode(word.w);
+  var bits = [];
+  var pos = posOf(word.m);
+  if (pos) bits.push(pos + '.');
+  if (p && p.roots.length) {
+    var r0 = p.roots[0], mean = '';
+    CODE_ROOT.forEach(function (r) { if (r[0] === r0) mean = r[1]; });
+    bits.push(r0 + (mean ? '(' + mean + ')' : ''));
+  }
+  if (!bits.length) { el.hidden = true; return; }
+  el.textContent = '🪶 ' + bits.join(' · ');
+  el.hidden = false;
+  el.classList.remove('pop');
+  void el.offsetWidth;
+  el.classList.add('pop');
+}
+
+/* ---------- 城防受击：裂纹分档 + 火光烟雾 + 火花 ---------- */
+var castleSmokeOn = false;
+function updateCastleViz() {
+  if (!run || !(run.mode === 'adventure' || run.mode === 'endless' || run.mode === 'expedition')) return;
+  var wrap = $('pressure-wrap'), cw = $('castle-fx');
+  if (!wrap || !cw) return;
+  var p = run.pressure;
+  wrap.classList.toggle('dmg-1', p >= 30 && p < 60);
+  wrap.classList.toggle('dmg-2', p >= 60 && p < 85);
+  wrap.classList.toggle('dmg-3', p >= 85);
+  if (p >= 70 && !castleSmokeOn) {
+    castleSmokeOn = true;
+    ['💨', '🔥', '💨'].forEach(function (em, i) {
+      var s = document.createElement('span');
+      s.className = 'castle-smoke';
+      s.textContent = em;
+      s.style.animationDelay = (i * 0.6) + 's';
+      cw.appendChild(s);
+    });
+  } else if (p < 40 && castleSmokeOn) {
+    castleSmokeOn = false;
+    Array.prototype.forEach.call(cw.querySelectorAll('.castle-smoke'), function (n) { n.remove(); });
+  }
+}
+function castleHitFx() {
+  var wrap = $('pressure-castle-wrap'), cw = $('castle-fx');
+  if (!wrap || !cw) return;
+  wrap.classList.remove('castle-hit');
+  void wrap.offsetWidth;
+  wrap.classList.add('castle-hit');
+  setTimeout(function () { wrap.classList.remove('castle-hit'); }, 500);
+  for (var i = 0; i < 2; i++) {
+    var s = document.createElement('span');
+    s.className = 'castle-spark';
+    s.textContent = i ? '✨' : '💥';
+    s.style.left = (6 + Math.random() * 26) + 'px';
+    s.style.animationDelay = (i * 0.09) + 's';
+    cw.appendChild(s);
+    (function (node) { setTimeout(function () { node.remove(); }, 750); })(s);
+  }
+}
+
+/* ---------- 通用小特效：斩击弧 / 白闪 / 红晕 / 冲击环 ---------- */
+function monsterCenter() {
+  var m = $('monster-emoji');
+  if (!m) return null;
+  var r = m.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
+}
+function fxAt(cls, x, y, life) {
+  var d = document.createElement('div');
+  d.className = cls;
+  d.style.left = x + 'px';
+  d.style.top = y + 'px';
+  $('fx-layer').appendChild(d);
+  setTimeout(function () { d.remove(); }, life || 500);
+}
+function slashAtMonster() {
+  var p = monsterCenter();
+  if (!p) return;
+  var d = document.createElement('div');
+  d.className = 'fx-slash';
+  d.style.left = (p.x - 45) + 'px';
+  d.style.top = (p.y - 45) + 'px';
+  $('fx-layer').appendChild(d);
+  setTimeout(function () { d.remove(); }, 420);
+}
+function ringAtMonster(gold) {
+  var p = monsterCenter();
+  if (!p) return;
+  var d = document.createElement('div');
+  d.className = 'fx-ring' + (gold ? ' gold' : '');
+  d.style.left = (p.x - 30) + 'px';
+  d.style.top = (p.y - 30) + 'px';
+  $('fx-layer').appendChild(d);
+  setTimeout(function () { d.remove(); }, 560);
+}
+function fxScreenVignette(bad) {
+  var d = document.createElement('div');
+  d.className = bad ? 'fx-vignette' : 'fx-flash';
+  $('fx-layer').appendChild(d);
+  setTimeout(function () { d.remove(); }, 460);
+}
+function killBurstFx() {
+  var p = monsterCenter();
+  if (p) Confetti.burst(26, p.x, p.y);
+  ringAtMonster(true);
+  shakeApp(true);
+}
+
+/* ---------- 蓄力一击：答题时点击怪物（或 ⚡ 按钮），约 1 秒蓄满自动释放 ----------
+   规则：每题限一次；伤害最多打到 1 血（不抢答题循环的击杀）；残血改为震慑击退压境。
+   天赋联动：蓄雷一击 smite 伤害翻倍 / 连击之魂 soul 增强震慑 / 屠龙蓄能 slayer 对 BOSS 加金币。 */
+var chargeSt = null;
+function canCharge() {
+  return !!(run && run.q && !run.q.locked && !run.ended && combatLike() &&
+    $('memcard').hidden && $('banner').hidden &&
+    activeMod() !== 'hex' &&   /* 妖印词缀：蓄力一击被封印 */
+    !run.q.chargeUsed && (!chargeSt || !chargeSt.active));
+}
+function cancelCharge() {
+  if (chargeSt) {
+    clearTimeout(chargeSt.to);
+    if (chargeSt.ring) chargeSt.ring.remove();
+    chargeSt = null;
+  }
+  var fig = $('monster-figure');
+  if (fig) fig.classList.remove('charging');
+}
+function tryStartCharge() {
+  if (!run || !run.q || run.q.locked || run.ended) return;
+  if (activeMod() === 'hex') {   /* 妖印词缀：给出一次提示，不弹窗轰炸 */
+    if (!run.q.hexToasted) { run.q.hexToasted = 1; toast('🔮 妖印词缀：蓄力一击被封印！'); }
+    return;
+  }
+  if (!canCharge()) return;
+  cancelCharge();
+  var fig = $('monster-figure');
+  var ring = document.createElement('div');
+  ring.className = 'charge-ring';
+  fig.appendChild(ring);
+  fig.classList.add('charging');
+  var q = run.q, seq = runEpoch;
+  chargeSt = {
+    q: q, epoch: seq, ring: ring, active: true,
+    to: setTimeout(function () {
+      var st = chargeSt;
+      cancelCharge();
+      if (!st || !run || run.ended || runEpoch !== seq || run.q !== q || q.locked) return;
+      releaseCharge(q);
+    }, 900)
+  };
+  Sfx.tone(280, .1, 'sine', 0, .045);
+  Sfx.tone(430, .25, 'sine', .12, .045);
+}
+function releaseCharge(q) {
+  q.chargeUsed = true;
+  $('btn-charge').hidden = true;
+  var m = run.monster;
+  if (!m) return;
+  var smite = talentLv('smite') > 0;
+  var dmg = smite ? 2 : 1;
+  fxScreenVignette(false);
+  slashAtMonster();
+  var mon = $('monster-emoji');
+  mon.classList.remove('hit');
+  void mon.offsetWidth;
+  mon.classList.add('hit');
+  Sfx.tone(760, .14, 'square', 0, .07);
+  Sfx.tone(980, .18, 'triangle', .06, .07);
+  if (m.shield > 0) {
+    m.shield--;
+    fx('⚡ 蓄力一击击碎了石肤护盾！', 'good', 25, 22);
+  } else if (m.hp > 1) {
+    m.hp = Math.max(1, m.hp - dmg);
+    fx('⚡ 蓄力一击 -' + dmg + (m.hp === 1 ? '·残血！' : ''), 'good', 25, 24);
+    if (smite) fx('⚡⚡ 蓄雷强化 ×2', 'good', 25, 12);
+  } else {
+    var knock = Math.round(6 * (1 + 0.1 * talentLv('soul')));
+    if (m.boss && talentLv('slayer')) {
+      var g = 8 * talentLv('slayer');
+      save.coins += g;
+      run.coinsEarned += g;
+      fx('🐉 屠龙蓄能 +' + g + '🪙', 'good', 30, 40);
+    }
+    addPressure(-knock);
+    fx('⚡ 震慑！敌军压境 -' + knock + '%', 'good', 25, 24);
+  }
+  updateHUD();
+  paintMonsterVisual(monsterTraitOpts());
 }
 
 /* ========================= 词汇密码（词根词缀拆解） ========================= */
@@ -857,11 +1338,21 @@ function renderMatch() {
       '<div class="mcard-face mcard-back">🎴</div>' +
       '<div class="mcard-face mcard-front' + (c.kind === 'm' ? ' meaning' : '') + '">' + c.text + '</div>' +
       '</div>';
-    d.onclick = function () { onMatchCard(i); };
     grid.appendChild(d);
   });
   $('match-moves').textContent = '👟 步数 ' + match.moves;
   $('match-pairs').textContent = '🧩 ' + match.matched + '/' + match.total + ' 对';
+}
+/* 配对成功共享逻辑（点击翻转与拖拽撞击共用；掌握度 seen++ 语义与原版一致） */
+function matchPairSuccess(a, b) {
+  a.done = b.done = true;
+  a.open = b.open = false;
+  match.matched++;
+  save.mastery[a.key] ? save.mastery[a.key].seen++ : (save.mastery[a.key] = { lv: 0, seen: 1, ok: 0, wrong: 0, last: Date.now(), due: 0, wrongStreak: 0 });
+  Sfx.correct(2 + match.matched);
+  TTS.speak(a.key, true);
+  persist();
+  if (match.matched >= match.total) finishMatch();
 }
 function onMatchCard(i) {
   if (!match || match.lock || match.finished) return;
@@ -869,21 +1360,12 @@ function onMatchCard(i) {
   if (c.open || c.done) return;
   c.open = true;
   match.openIdx.push(i);
-  renderMatch();
   if (match.openIdx.length === 2) {
     match.moves++;
     var a = match.cards[match.openIdx[0]], b = match.cards[match.openIdx[1]];
     if (a.key === b.key && a.kind !== b.kind) {
-      a.done = b.done = true;
-      a.open = b.open = false;
-      match.matched++;
       match.openIdx = [];
-      save.mastery[a.key] ? save.mastery[a.key].seen++ : (save.mastery[a.key] = { lv: 0, seen: 1, ok: 0, wrong: 0, last: Date.now(), due: 0, wrongStreak: 0 });
-      Sfx.correct(2 + match.matched);
-      TTS.speak(a.key, true);
-      renderMatch();
-      persist();
-      if (match.matched >= match.total) finishMatch();
+      matchPairSuccess(a, b);
     } else {
       match.lock = true;
       Sfx.tone(200, .12, 'sine', 0, .05);
@@ -896,6 +1378,106 @@ function onMatchCard(i) {
       }, 750);
     }
   }
+  renderMatch();
+}
+
+/* ---------- 记忆配对：拖拽撞击配对（点击翻牌仍可用） ----------
+   pointerdown 记牌 → 移动超 8px 视为拖拽（浮起跟手幽灵卡）→
+   松手落在另一张卡上：同词异类 = 直接配对成功；否则亮出对方 0.75s 弹回。 */
+var matchDrag = null;
+function matchDragTargetAt(x, y, self) {
+  var nodes = $('match-grid').querySelectorAll('.mcard');
+  for (var k = 0; k < nodes.length; k++) {
+    var r = nodes[k].getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return k === self ? -1 : k;
+  }
+  return -1;
+}
+function tryDragPair(i, t) {
+  if (!match || match.finished) return;
+  var a = match.cards[i], b = match.cards[t];
+  if (!a || !b || a.done || b.done || a === b) return;
+  if (a.key === b.key && a.kind !== b.kind) {
+    match.moves++;
+    matchPairSuccess(a, b);
+    var el = $('match-grid').children[t];
+    if (el) {
+      var r = el.getBoundingClientRect();
+      Confetti.burst(14, r.left + r.width / 2, r.top + r.height / 2);
+    }
+    renderMatch();
+  } else {
+    match.moves++;
+    match.lock = true;
+    Sfx.tone(200, .12, 'sine', 0, .05);
+    b.open = true;
+    renderMatch();
+    setTimeout(function () {
+      if (!match) return;
+      b.open = false;
+      /* 目标牌若原本经点击翻开（在 openIdx 里），翻回时同步清掉，避免 openIdx 残留幽灵牌 */
+      var oi = match.openIdx.indexOf(t);
+      if (oi >= 0) match.openIdx.splice(oi, 1);
+      match.lock = false;
+      renderMatch();
+    }, 750);
+  }
+}
+function bindMatchDrag() {
+  var grid = $('match-grid');
+  if (!grid) return;
+  grid.addEventListener('pointerdown', function (e) {
+    if (!match || match.finished || match.lock) return;
+    var el = e.target.closest('.mcard');
+    if (!el) return;
+    var i = Array.prototype.indexOf.call(grid.querySelectorAll('.mcard'), el);
+    if (i < 0) return;
+    var c = match.cards[i];
+    if (c.open || c.done) return;
+    matchDrag = { i: i, x0: e.clientX, y0: e.clientY, moved: false, ghost: null, pid: e.pointerId };
+    try { el.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  grid.addEventListener('pointermove', function (e) {
+    var st = matchDrag;
+    if (!st || e.pointerId !== st.pid) return;
+    if (!st.moved && Math.abs(e.clientX - st.x0) + Math.abs(e.clientY - st.y0) < 8) return;
+    if (!st.moved) {
+      st.moved = true;
+      var src = grid.children[st.i];
+      if (src) src.classList.add('drag-src');
+      var g = document.createElement('div');
+      g.className = 'mcard-ghost' + (match.cards[st.i].kind === 'm' ? ' meaning' : '');
+      g.textContent = match.cards[st.i].text;
+      document.body.appendChild(g);
+      st.ghost = g;
+    }
+    if (st.ghost) {
+      st.ghost.style.left = (e.clientX - 42) + 'px';
+      st.ghost.style.top = (e.clientY - 32) + 'px';
+    }
+    var t = matchDragTargetAt(e.clientX, e.clientY, st.i);
+    for (var k = 0; k < grid.children.length; k++) {
+      grid.children[k].classList.toggle('drop-hint', k === t);
+    }
+  });
+  grid.addEventListener('pointerup', function (e) { matchDragFinish(e, false); });
+  grid.addEventListener('pointercancel', function (e) { matchDragFinish(e, true); });
+}
+function matchDragFinish(e, cancelled) {
+  var st = matchDrag;
+  if (!st || e.pointerId !== st.pid) return;
+  matchDrag = null;
+  var grid = $('match-grid');
+  for (var k = 0; k < grid.children.length; k++) {
+    grid.children[k].classList.remove('drop-hint', 'drag-src');
+  }
+  if (st.ghost) st.ghost.remove();
+  if (cancelled || !st.moved) {
+    if (!cancelled) onMatchCard(st.i);   /* 没怎么动 = 点击翻牌 */
+    return;
+  }
+  var t = matchDragTargetAt(e.clientX, e.clientY, st.i);
+  if (t >= 0) tryDragPair(st.i, t);
 }
 function finishMatch() {
   match.finished = true;
@@ -909,6 +1491,184 @@ function finishMatch() {
   Confetti.burst(80);
   toast('🃏 配对完成！' + match.moves + ' 步 / ' + secs + ' 秒，奖励 🪙' + coins);
   $('match-time').textContent = '⏱ ' + secs + ' 秒';
+}
+
+/* ========================= 词根合成实验室 =========================
+   用「词汇密码」的拆解数据出题，10 题一轮，两种题型随机混合：
+   🔍 拆解题：给出单词+释义，选出它真正的词根（只练拆解，不写学习进度）
+   ⚗️ 合成题：给出前缀+词根(+后缀)零件，选出由这些零件组成的单词——
+      本质是一次「看拆解认词」的复习，按作答结果写入 SRS（updateMastery）。
+   答对得金币与 EXP，连对有加成，10 题全对另有全对大奖。 */
+var lab = null;
+var LAB_TOTAL = 10;
+var labPoolMemo = null;
+function labPool() {   /* 有拆解结果、有释义的内置词 */
+  if (labPoolMemo) return labPoolMemo;
+  labPoolMemo = [];
+  ALL_WORDS.forEach(function (it) {
+    var m = MEANING_OF[it.w];
+    if (!m) return;
+    var p = parseCode(it.w);
+    if (p && p.roots.length && p.roots.length <= 2) labPoolMemo.push({ w: it.w, m: m, p: p });
+  });
+  return labPoolMemo;
+}
+function labRootMean(root) {
+  var mean = '';
+  CODE_ROOT.forEach(function (r) { if (r[0] === root) mean = r[1]; });
+  return mean;
+}
+function labQuestion() {
+  var pool = labPool();
+  var it = pool[Math.floor(Math.random() * pool.length)];
+  var root = it.p.roots[0];
+  var q = { w: it.w, m: it.m, p: it.p, root: root, rootMean: labRootMean(root), locked: false };
+  if (Math.random() < 0.5) {
+    q.kind = 'split';
+    var opts = [{ t: root, mean: q.rootMean, ok: true }];
+    var guard = 0;
+    while (opts.length < 4 && guard++ < 300) {
+      var r2 = rnd(CODE_ROOT);
+      if (r2[0] === root || opts.some(function (o) { return o.t === r2[0]; })) continue;
+      opts.push({ t: r2[0], mean: r2[1], ok: false });
+    }
+    shuffle(opts);
+    q.options = opts;
+  } else {
+    q.kind = 'merge';
+    var opts2 = [{ w: it.w, ok: true }];
+    var guard2 = 0;
+    while (opts2.length < 4 && guard2++ < 400) {
+      var w2 = pool[Math.floor(Math.random() * pool.length)];
+      if (w2.w === it.w || opts2.some(function (o) { return o.w === w2.w; })) continue;
+      /* 干扰项不能含正确答案的词根，否则「零件组成」无从排除 */
+      var clash = w2.p.roots.some(function (r) { return it.p.roots.indexOf(r) >= 0; });
+      if (clash) continue;
+      opts2.push({ w: w2.w, ok: false });
+    }
+    shuffle(opts2);
+    q.options = opts2;
+  }
+  for (var i = 0; i < q.options.length; i++) { if (q.options[i].ok) q.answer = i; }
+  return q;
+}
+function openLab() {
+  showScreen('scr-lab');
+  $('lab-play').hidden = true;
+  $('lab-done').hidden = true;
+  $('lab-intro').hidden = false;
+  $('btn-lab-start').hidden = false;
+}
+function startLab() {
+  lab = { round: 0, ok: 0, streak: 0, maxStreak: 0, score: 0, coins: 0, q: null, locked: false };
+  $('lab-intro').hidden = true;
+  $('lab-done').hidden = true;
+  $('lab-play').hidden = false;
+  $('btn-lab-start').hidden = true;
+  labNext();
+}
+function labNext() {
+  if (!lab) return;
+  if (lab.round >= LAB_TOTAL) { labFinish(); return; }
+  lab.q = labQuestion();
+  lab.locked = false;
+  var q = lab.q;
+  $('lab-round').textContent = '🧪 第 ' + (lab.round + 1) + '/' + LAB_TOTAL + ' 题';
+  $('lab-streak').textContent = '🔥 连对 ' + lab.streak;
+  $('lab-ok').textContent = '✅ 答对 ' + lab.ok;
+  $('lab-score').textContent = lab.score + ' 分';
+  $('lab-feedback').hidden = true;
+  $('btn-lab-next').hidden = true;
+  $('lab-opts').innerHTML = '';
+  $('lab-opts').className = 'q-options lab-opts';
+  $('lab-kind').textContent = q.kind === 'split' ? '🔍 拆解挑战：这个词里藏着哪个词根？' : '⚗️ 合成挑战：哪位单词由这些零件组成？';
+  if (q.kind === 'split') {
+    $('lab-word').hidden = false;
+    $('lab-word').textContent = q.w;
+    $('lab-mean').hidden = false;
+    $('lab-mean').textContent = q.m;
+    $('lab-pieces').hidden = true;
+  } else {
+    $('lab-word').hidden = true;   /* 合成题：单词就是答案，不能先亮出来 */
+    $('lab-word').textContent = '';
+    $('lab-mean').hidden = true;
+    $('lab-mean').textContent = '';
+    $('lab-pieces').hidden = false;
+    $('lab-pieces').textContent = '🧩 ' + q.p.text;
+  }
+  q.options.forEach(function (opt, i) {
+    var b = document.createElement('button');
+    b.className = 'q-opt';
+    b.dataset.i = String(i);
+    b.innerHTML = '<i class="key-num">' + (i + 1) + '</i>' + (q.kind === 'split' ? opt.t + ' · ' + opt.mean : opt.w);
+    $('lab-opts').appendChild(b);
+  });
+}
+function labAnswer(i) {
+  if (!lab || lab.locked || !lab.q) return;
+  lab.locked = true;
+  var q = lab.q;
+  var ok = i === q.answer;
+  save.stats.labN = (save.stats.labN || 0) + 1;
+  var btns = $('lab-opts').children;
+  var fb = '';
+  if (ok) {
+    lab.ok++;
+    lab.streak++;
+    lab.maxStreak = Math.max(lab.maxStreak, lab.streak);
+    save.stats.labOk = (save.stats.labOk || 0) + 1;
+    var gain = 3 + (lab.streak % 5 === 0 ? 5 : 0);   /* 连对每满 5 额外 +5🪙 */
+    save.coins += gain;
+    lab.coins += gain;
+    lab.score += 10 + lab.streak * 2;
+    addXp(2);
+    bumpTask('lab_ok');
+    btns[q.answer].classList.add('correct');
+    Sfx.correct(lab.streak);
+    Sfx.coin();
+    fb = '✅ 拆对了！<b>' + q.w + '</b> = ' + q.p.text + '<br>' + q.m + '　🪙+' + gain;
+    if (q.kind === 'merge') updateMastery(q.w, true, false);   /* 合成题：认出了这个词，写入 SRS */
+  } else {
+    lab.streak = 0;
+    btns[i].classList.add('wrong');
+    btns[q.answer].classList.add('correct');
+    Sfx.wrong();
+    fb = '❌ 正确答案是 <b>' + (q.kind === 'split' ? q.root + '（' + q.rootMean + '）' : q.w) + '</b><br><b>' + q.w + '</b> = ' + q.p.text + '<br>' + q.m;
+    if (q.kind === 'merge') updateMastery(q.w, false, false);
+  }
+  if (typeof TTS !== 'undefined') TTS.speak(q.w, false);   /* 揭底时读一遍，听音强化 */
+  $('lab-streak').textContent = '🔥 连对 ' + lab.streak;
+  $('lab-ok').textContent = '✅ 答对 ' + lab.ok;
+  $('lab-score').textContent = lab.score + ' 分';
+  $('lab-feedback').innerHTML = fb;
+  $('lab-feedback').hidden = false;
+  $('btn-lab-next').hidden = false;
+  $('btn-lab-next').textContent = lab.round + 1 >= LAB_TOTAL ? '🏁 查看成绩' : '➡️ 下一题';
+  persist();
+  checkAch();
+}
+function labFinish() {
+  var perfect = lab.ok >= LAB_TOTAL;
+  var bonus = 0;
+  if (perfect) {
+    bonus = 20;
+    save.coins += bonus;
+    lab.coins += bonus;
+    lab.score += 50;
+    Confetti.burst(80);
+    Sfx.levelup();
+  }
+  $('lab-play').hidden = true;
+  $('lab-done').hidden = false;
+  $('lab-done-text').innerHTML = '本轮 ' + lab.ok + '/' + LAB_TOTAL + ' 题答对 · 最高连对 ' + lab.maxStreak +
+    '<br>获得 🪙' + lab.coins + (perfect ? '　🏆 全对大奖 🪙' + bonus + ' +50 分！' : '') +
+    '<br><span class="hint">合成题的作答已写入学习进度（间隔重复照常调度）</span>';
+  persist();
+}
+function labNextOrFinish() {
+  if (!lab) return;
+  lab.round++;
+  labNext();
 }
 
 /* ========================= 学习统计图表（Canvas） ========================= */
@@ -1028,9 +1788,14 @@ function comboBurst() {
   var bonus = Math.round((10 + run.combo) * coinMult());
   save.coins += bonus;
   run.coinsEarned += bonus;
-  if (run.mode === 'adventure' || run.mode === 'endless') addPressure(-8);
+  if (run.mode === 'adventure' || run.mode === 'endless' || run.mode === 'expedition') addPressure(-8);
   Sfx.levelup();
   fx('⚡ 勇者爆发！+' + bonus + '🪙 生命+2', 'good', 50, 16);
+  /* 全屏金色冲击波从战场中心扩散 */
+  var d = document.createElement('div');
+  d.className = 'fx-ring gold center-burst';
+  $('fx-layer').appendChild(d);
+  setTimeout(function () { d.remove(); }, 560);
   var bf = document.querySelector('.battlefield');
   if (bf) {
     bf.classList.remove('flash');
@@ -1145,6 +1910,174 @@ function buildReviewPool(listIds) {
   return all;
 }
 
+/* ========================= 主题挑战包（内置词典按主题筛选，主界面可选） =========================
+   词池为显式注入（同投毒通道），答题照常走 updateMastery，学习进度与 SRS 完全互通 */
+var ROOT_PACK_ROOTS = ['spect', 'port', 'dict', 'ject', 'duct', 'tract', 'form', 'mit', 'miss',
+  'fer', 'pos', 'pon', 'sist', 'tain', 'vert', 'vers', 'scrip', 'struct', 'press', 'aud', 'vis', 'vid', 'cur', 'rupt', 'cap'];
+var PACK_CAP = 120;    /* 词根家族包上限 */
+var PAIR_PACK_PAIRS = 30;  /* 易混淆对包的对数 */
+
+/* 词根家族：同根词按家族聚合（port/spect/dict…一次吃透一串词） */
+function buildRootsPack() {
+  var fam = {}, seen = {}, n = 0;
+  ALL_WORDS.forEach(function (it) {
+    if (seen[it.w]) return;
+    var p = parseCode(it.w);
+    if (!p) return;
+    for (var i = 0; i < p.roots.length; i++) {
+      if (ROOT_PACK_ROOTS.indexOf(p.roots[i]) >= 0) {
+        (fam[p.roots[i]] = fam[p.roots[i]] || []).push(it);
+        seen[it.w] = 1;
+        n++;
+        break;
+      }
+    }
+  });
+  /* 按家族规模从大到小聚合排列，学起来成串 */
+  var out = [];
+  Object.keys(fam).sort(function (a, b) { return fam[b].length - fam[a].length; }).forEach(function (r) {
+    fam[r].forEach(function (it) { out.push({ w: it.w, m: it.m }); });
+  });
+  return out.slice(0, PACK_CAP);
+}
+
+/* 易混淆对：形近词（同长度恰 1 位字母不同）+ 变位词（同字母重排）成对打包 */
+function confusablePair(a, b) {
+  if (a.length !== b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) {
+    if (a.charAt(i) !== b.charAt(i)) { diff++; if (diff > 1) return false; }
+  }
+  return diff === 1;
+}
+function buildConfusePack() {
+  var byLen = {}, ana = {}, picked = [], used = {};
+  ALL_WORDS.forEach(function (it) {
+    if (!/^[a-z]{4,10}$/.test(it.w)) return;
+    (byLen[it.w.length] = byLen[it.w.length] || []).push(it.w);
+    var k = it.w.split('').sort().join('');
+    (ana[k] = ana[k] || []).push(it.w);
+  });
+  var pairs = [];
+  Object.keys(byLen).forEach(function (L) {
+    var arr = byLen[L];
+    for (var i = 0; i < arr.length; i++) {
+      for (var j = i + 1; j < arr.length; j++) {
+        if (confusablePair(arr[i], arr[j])) pairs.push([arr[i], arr[j]]);
+      }
+    }
+  });
+  Object.keys(ana).forEach(function (k) {
+    if (ana[k].length > 1) pairs.push([ana[k][0], ana[k][1]]);
+  });
+  for (var i = 0; i < pairs.length && picked.length < PAIR_PACK_PAIRS * 2; i++) {
+    [pairs[i][0], pairs[i][1]].forEach(function (w) {
+      if (picked.length >= PAIR_PACK_PAIRS * 2 || used[w]) return;
+      used[w] = 1;
+      picked.push({ w: w, m: MEANING_OF[w] || '' });
+    });
+  }
+  return picked.filter(function (x) { return x.m; });
+}
+
+/* 高频核心 / 学术词族：种子词表 × 内置词典取交集（构建器内再过滤一次兜底） */
+var CORE_PACK_SEED = ["ability","absorb","access","account","achieve","acquire","adjust","admire","advance","advantage","advice","afford","agree","agriculture","alarm","ancient","announce","annoy","apologize","appear","appetite","apply","appreciate","approach","argue","arrange","arrest","artist","aspect","assess","assist","assume","attach","attempt","attend","attract","audience","authority","available","avoid","awake","award","aware","balance","ban","band","bargain","barrier","beam","behalf","benefit","betray","blame","blend","board","boost","border","bounce","brand","breath","brief","broad","budget","burst","campaign","candidate","capacity","capture","carbon","caution","celebrate","ceremony","chain","challenge","channel","chapter","character","charge","chase","cheat","cherish","chief","cite","climate","coach","collapse","colleague","combine","command","comment","commerce","communicate","compare","compensate","compete","complain","complete","concentrate","concern","conclude","concrete","confidence","confirm","confuse","connect","conquer","consent","consequence","consider","construct","consult","consume","contact","contain","contemporary","contest","context","continue","contract","contrary","contrast","contribute","convention","convince","cooperate","coordinate","corporate","correct","council","crash","credit","crime","crisis","criterion","crowd","crucial","cultivate","curious","current","customer","cycle","damage","debate","debt","decade","decide","decline","decorate","decrease","dedicate","defeat","defend","definite","degree","delay","delegate","delicate","deliver","demand","democracy","demonstrate","dense","deny","depart","depend","deposit","deprive","describe","deserve","desire","detect","develop","devote","diagnose","differ","digital","dilemma","diminish","diplomat","disable","disappear","disaster","discipline","disclose","discount","discover","discuss","disease","dismiss","disorder","display","distance","distinct","distinguish","distribute","diverse","divide","divorce","dominate","dramatic","drift","eager","earn","economic","economy","edition","educate","effect","efficient","effort","elaborate","element","eliminate","embarrass","emerge","emergency","emit","emotion","emphasize","employ","enable","encounter","encourage","endure","engage","engine","enormous","ensure","enterprise","entertain","enthusiasm","entitle","environment","equip","essential","establish","estimate","evaluate","eventually","evidence","evolution","exaggerate","examine","exceed","excellent","exchange","exclude","execute","exhaust","exhibit","exist","expand","expect","expense","experience","experiment","expert","explode","exploit","explore","express","extend","external","extraordinary","fabric","facilitate","factor","faculty","fade","fail","faint","faith","fake","favor","feature","federal","feedback","female","fiber","figure","finance","firm","flexible","flourish","focus","forecast","foreign","forge","formal","fortunate","fossil","foster","frame","fraud","frequent","friction","frontier","frustrate","function","fund","furious","furnish","furthermore","future","gallery","gather","generate","generous","genuine","glance","gloomy","grain","grand","grant","graphic","grasp","grateful","grave","gravity","greed","grief","guarantee","guilt","habit","halt","handle","harbor","harmony","haste","hazard","headline","heal","heap","hesitate","hierarchy","highlight","hinder","hollow","holy","horizon","household","humble","identify","ideology","ignorance","illustrate","imagine","imitate","immense","impact","implement","imply","impose","impress","improve","impulse","increase","incur","independent","indicate","indifferent","individual","industrial","inevitable","infect","infer","influence","infrastructure","inherit","initial","inject","innocent","innovation","input","inquire","insect","insert","inspire","install","instinct","institute","instruct","instrument","insult","insurance","integrate","intellect","intelligent","intend","intense","interact","interfere","internal","interpret","interrupt","interval","intervene","interview","intimate","invade","invest","investigate","invite","involve","isolate","issue","item","jail","jealous","joint","judge","junction","junior","jury","keen","kidnap","label","launch","layer","layout","league","lean","legend","legislation","legitimate","leisure","lens","liable","liberal","liberty","license","linger","link","literal","literature","loan","lobby","locate","logic","lonely","loose","lounge","luxury","magnet","magnificent","maintain","majority","manage","manifest","manipulate","manner","manufacture","margin","marine","mask","massive","mature","mechanism","medal","media","mediate","medium","melt","memorial","mental","mention","merchant","mercy","merge","merit","method","military","minor","miracle","mirror","misery","missile","mission","mobile","mode","moderate","modest","modify","monitor","monopoly","mood","moral","motion","motivate","mount","mourn","municipal","murder","muscle","mutual","mystery","myth","necessary","negative","negotiate","nerve","nervous","network","neutral","normal","notable","notion","nuclear","nurture","obligation","observe","obstacle","obtain","obvious","occupy","occur","offensive","offer","omit","opinion","opponent","opportunity","oppose","option","orbit","orchard","organic","organize","orient","origin","original","ornament","outcome","outline","outrage","outstanding","overcome","overhead","overlook","overturn","overwhelm","owe","ownership","oxygen","pact","panel","parade","paragraph","parallel","parcel","parliament","participate","partner","passion","passive","passport","patent","patience","pattern","pause","peak","penalty","pension","perceive","perform","permanent","permission","permit","persist","personnel","perspective","persuade","pessimistic","petition","phenomenon","philosophy","physical","physician","planet","plausible","plead","plot","poison","policy","polish","politician","pollute","ponder","portion","portrait","portray","positive","possess","possibility","postage","postpone","potential","poverty","practice","praise","precaution","precede","precious","precise","predict","prefer","prejudice","preliminary","premise","premium","prescribe","presence","preserve","prestige","prevail","prevent","previous","prey","primary","prime","primitive","principal","principle","prior","priority","privacy","privilege","probe","procedure","proceed","process","profession","professor","profile","profit","profound","progress","prohibit","project","prolong","prominent","promise","promote","prompt","prone","pronounce","proof","property","proportion","proposal","propose","prospect","prosper","protect","protein","protest","provide","provoke","publish","punctual","punish","purchase","pure","purpose","pursue","quality","quantity","quest","questionnaire","queue","quote","racial","radiate","random","rational","raw","readily","realistic","rebel","receipt","receive","reception","recipe","recite","recognize","recommend","recover","recruit","recycle","refine","reflect","reform","refuge","refuse","region","register","regulate","reign","reinforce","reject","relax","release","relevant","reluctant","rely","remain","remark","remedy","remind","remote","render","renew","rent","repair","replace","reproduce","republic","reputation","request","require","rescue","resemble","reserve","reside","resign","resolve","resort","respective","respond","restore","restrain","restrict","result","resume","retail","retain","retreat","reveal","revenue","reverse","review","revise","revolve","reward","rhythm","ribbon","ridiculous","rigid","rigorous","ritual","rival","robust","rocket","romantic","rotate","rough","route","routine","royal","ruin","rumor","rural","rust","sacrifice","salary","sample","sanction","satellite","satisfy","saturate","savage","scatter","scheme","scope","scout","scramble","script","scrutiny","sculpture","seal","secondary","secret","section","sector","secure","segment","seize","semester","sensation","sequence","series","serious","session","settle","severe","shabby","shade","share","shatter","shelter","shield","shift","shortage","shrink","siege","signal","significant","similar","sincere","sketch","skilled","slave","sleeve","slender","slide","slim","smash","soar","sole","solemn","solid","solution","solve","sophisticated","sore","sorrow","source","span","spare","sphere","spill","spin","spite","splash","split","spoil","sponsor","spontaneous","spouse","stable","staff","stagger","stain","stake","stale","standpoint","statement","status","steady","steep","steer","stem","stern","stiff","stimulate","sting","stir","stock","storage","strategy","stream","stress","strict","strive","studio","stuff","stumble","submit","subordinate","subscribe","subsequent","subsidy","substance","substantial","substitute","subtle","suburb","succeed","sufficient","summit","summon","superb","superior","supplement","support","suppose","suppress","supreme","surge","surplus","surround","survey","survive","suspect","sustain","swallow","swamp","swap","swear","sweat","swell","swift","switch","sword","symbol","sympathy","symptom","syndrome","systematic","tablet","tackle","talent","target","tariff","tease","tedious","temper","temporary","tempt","tenant","tendency","tender","tense","terminal","terminate","terrain","testify","texture","theme","theory","therapy","thereby","thorough","thread","threat","thrive","throne","throughout","tidy","tight","timid","tolerate","torture","toss","tough","toxic","trace","track","tragedy","trait","transaction","transfer","transform","translate","transmit","transparent","transport","trap","trauma","treaty","tremble","trend","trial","tribe","tribute","trigger","trim","triumph","troop","tropic","trust","tunnel","ultimate","unanimous","underestimate","undergo","undergraduate","underlie","underline","undermine","undertake","unemployment","unexpected","unfair","unfold","uniform","unify","union","unique","universal","universe","unprecedented","upgrade","uphold","upset","urban","urge","urgent","usage","utility","utilize","utmost","utter","vacant","valid","valuable","vanish","vapor","variation","variety","various","vary","vast","veil","velocity","venture","verify","versatile","version","vessel","veteran","vibrate","vice","vigorous","violate","violence","virtue","visible","vision","visual","vital","vivid","vocal","void","volcano","volume","voluntary","vote","voyage","wage","warehouse","warfare","warrior","weave","welfare","whereas","whisper","widespread","wisdom","wit","withdraw","withstand","witness","workshop","worship","worth","wound","wrap","wreck","yield","zeal","zone"];
+var ACAD_PACK_SEED = ["academic","accumulate","accurate","accusation","acknowledge","adapt","adequate","adjust","adolescent","advocate","aesthetic","affect","allocate","ambiguous","amend","analogy","analyze","ancestor","anticipate","appendix","applicable","arbitrary","architecture","arithmetic","artificial","asset","atmosphere","attorney","authentic","autonomy","avenue","aviation","bachelor","bacteria","ballet","barren","beneath","bias","bibliography","biography","bizarre","boundary","bureaucracy","cabinet","canvas","cathedral","census","certainty","chamber","chaos","circulate","cite","client","collaborate","collapse","collar","commodity","compound","comprise","compulsory","conceive","conception","concise","condense","configuration","confine","conform","confront","congestion","conjunction","consensus","consistency","consolidate","constrain","contemplate","contemporary","contradict","converge","coordinate","cosmic","counsel","counterpart","criterion","crucial","crystal","curriculum","data","declaration","deduce","deficit","degrade","deliberate","denote","deposit","detach","deteriorate","devise","dialect","diameter","dictate","differentiate","diffuse","dimension","discourse","discrete","discrepancy","dissertation","doctrine","document","domain","drawback","eccentric","elaborate","electricity","elegant","elevate","eligible","empirical","enclose","endeavor","enhance","enlighten","enroll","enterprise","entity","epidemic","equivalent","erode","ethnic","exemplify","exert","expedition","explicit","feminine","flaw","flee","fluctuate","formulate","fossil","framework","frontier","fundamental","galaxy","genetic","geology","glacier","gravity","grid","hypothesis","ideology","illuminate","imperial","incentive","inclination","incorporate","inference","ingenious","ingredient","inherent","initiate","innovation","input","intact","integral","junction","laboratory","latitude","legislation","linguistic","literacy","livestock","longitude","magnitude","mammal","manuscript","margin","mathematical","mechanic","mechanism","medieval","metaphor","molecule","momentum","municipal","negative","neutral","nourish","nuclear","objective","oblige","observation","offspring","orbit","organic","overall","overlap","paragraph","parameter","particle","patent","peak","pedal","penetrate","perception","permeate","perpetual","phenomenon","philosopher","plague","plateau","polar","ponder","precision","predominant","preliminary","premise","primitive","probability","procedure","proficiency","profound","prominent","proof","proportion","proposition","prose","protein","prototype","punctual","qualification","quantitative","quotation","radar","radical","random","ratio","rational","recipient","reckon","refute","regime","region","reign","remainder","renaissance","render","reptile","resemblance","resource","resume","revelation","revenue","revolution","rigorous","ritual","rivalry","robot","robust","rural","satellite","scale","scheme","scope","secondary","sector","segment","sensation","sequence","session","shrink","significant","simultaneous","sociology","software","solidarity","spectator","spectrum","spontaneous","stability","steady","stimulus","subsequent","subsidy","substance","substantial","subtle","sufficient","summarize","superficial","supplement","suppress","surface","surgeon","surpass","surplus","susceptible","synthesis","systematic","tactic","tangible","technique","technology","telescope","temporary","tendency","terminal","territory","theft","therapy","thereby","thesis","thrive","transaction","transfer","transparent","transplant","trauma","trigger","ultimate","unanimous","undergraduate","underlying","uniform","unify","unprecedented","urban","utility","utilize","vaccine","valid","variation","vegetation","velocity","venture","verbal","verify","veteran","virtually","visible","visual","voluntary","warehouse","widespread","withdrawal","withstand","workshop","yield"];
+var CORE_PACK_CAP = 500;   /* 高频核心包词量上限 */
+var ACAD_PACK_CAP = 150;   /* 学术词族包词量上限（且与高频核心包不重复） */
+
+/* 高频核心包：种子表按固定种子洗牌铺开再截取，避免按字母序截断 */
+function buildCorePack() {
+  var rng = mulberry32(hashStr('wq-core-pack'));
+  var pool = [];
+  CORE_PACK_SEED.forEach(function (w) {
+    var it = MEANING_OF[w] !== undefined ? { w: w, m: MEANING_OF[w] } : null;
+    if (it) pool.push(it);
+  });
+  return seededShuffle(pool, rng).slice(0, CORE_PACK_CAP);
+}
+/* 学术词族包：排除高频核心包已收录的词，两包不重复 */
+function buildAcadPack() {
+  var rng = mulberry32(hashStr('wq-acad-pack'));
+  var coreSet = {};
+  CORE_PACK_SEED.forEach(function (w) { coreSet[w] = 1; });
+  var pool = [];
+  ACAD_PACK_SEED.forEach(function (w) {
+    if (coreSet[w] || MEANING_OF[w] === undefined) return;
+    pool.push({ w: w, m: MEANING_OF[w] });
+  });
+  return seededShuffle(pool, rng).slice(0, ACAD_PACK_CAP);
+}
+
+var PACKS = [
+  { id: 'roots',   icon: '🧩', name: '词根家族', desc: '同根词集中特训：port / spect / dict / ject…一串一串吃透，附词汇密码拆解', build: buildRootsPack },
+  { id: 'confuse', icon: '🔀', name: '易混淆对', desc: '形近词成对出击：band/bend、quiet/quite…专治「看走眼」，干扰项全是它的孪生兄弟', build: buildConfusePack },
+  { id: 'core',    icon: '⚡', name: '高频核心 500', desc: '考试最爱考的核心词 500 个（四六级交集高频表）：先混个脸熟，再各个击破', build: buildCorePack },
+  { id: 'acad',    icon: '🎓', name: '学术词族', desc: '论文与学术场景高频词 150 个（hypothesis / paradigm / synthesis…），与高频核心包不重复', build: buildAcadPack }
+];
+function packById(id) {
+  var f = null;
+  PACKS.forEach(function (p) { if (p.id === id) f = p; });
+  return f;
+}
+function packWords(p) { return p.build(); }
+
+function openPacks() {
+  showScreen('scr-packs');
+  var html = '';
+  PACKS.forEach(function (p) {
+    var words = packWords(p);
+    var learned = words.filter(function (x) { var m = save.mastery[x.w]; return m && m.seen > 0; }).length;
+    html += '<div class="pack-card"><div class="pack-icon">' + p.icon + '</div>' +
+      '<div class="pack-info"><div class="pack-name">' + p.name + '</div>' +
+      '<div class="pack-desc">' + p.desc + '</div>' +
+      '<div class="pack-progress">📚 ' + words.length + ' 词 · 已学 ' + learned + ' · ⭐ 已掌握 ' +
+      words.filter(function (x) { var m = save.mastery[x.w]; return m && m.lv >= 5; }).length + '</div></div>' +
+      '<button class="btn btn-primary btn-small pack-start" data-p="' + p.id + '">⚔️ 挑战</button></div>';
+  });
+  $('pack-list').innerHTML = html + '<p class="hint">主题包按主题筛选内置词库，冒险规则照常（BOSS / 商店 / 词缀都在）；学习进度与星级照常累积</p>';
+}
+
+function startPackRun(pid) {
+  var p = packById(pid);
+  if (!p) return;
+  var pool = packWords(p);
+  if (pool.length < 4) { toast('该主题包词量不足，无法开战'); return; }
+  var ids = (save.lastLists || []).filter(function (id) { return !!listById(id); });
+  if (!ids.length) ids = ['cet4'];
+  startRun('adventure', ids, save.lastDiff || 'normal', pool);
+  run.unitCtx = null;   /* 主题包以包内词为唯一词池，不受单元制调度 */
+  run.unitSet = null;
+  run.packId = p.id;
+  toast(p.icon + ' 主题挑战「' + p.name + '」开始！');
+}
+
+/* ========================= 每日远征（种子化固定关卡） =========================
+   词池与词缀由当日日期作种（同每日任务的种子随机思路）——同一天内所有玩家
+   遇到同一批词、同一条词缀 schedule，难度自选；第二天自动换一副面孔。
+   3 关：迎击 8 只 → 精英 10 只（挂当日词缀 A）→ BOSS 决战（挂当日词缀 B）。
+   积分 = 击杀×10 + 答对×2 + 最高连击×5 + 通关 100；当日首通额外奖 80🪙。 */
+var EXP_STAGES = [
+  { size: 8,  boss: false, mod: -1 },   /* mod: -1=无词缀，0/1=expMods 下标 */
+  { size: 10, boss: false, mod: 0 },
+  { size: 1,  boss: true,  mod: 1 }
+];
+function expDayStamp() { return new Date().toDateString(); }
+function planExpedition(listIds) {
+  var ids = (listIds || []).filter(function (id) { return !!listById(id); });
+  if (!ids.length) ids = ['cet4'];
+  var rng = mulberry32(hashStr(expDayStamp() + '|expedition'));
+  var words = seededShuffle(buildPool(ids), rng).slice(0, 20);
+  var mods = seededShuffle(Object.keys(BOSS_MODS), rng);
+  return { ids: ids, pool: words, expMods: [mods[0], mods[1]] };
+}
+function expScore(reason) {
+  return run.kills * 10 + run.correct * 2 + run.maxCombo * 5 + (reason === 'done' ? 100 : 0);
+}
+function expTodayCleared() {
+  return !!(save.expedition && save.expedition.clearDate === expDayStamp());
+}
+
 /* 加权选词：低掌握 / 没见过 / 到期该复习的优先 */
 function pickWord() {
   if (run.mode === 'plan' && run.planQueue && run.planQueue.length) {
@@ -1190,6 +2123,16 @@ function distractors(word, n) {
   var pos = posOf(word.m);
   var cands = src.filter(function (x) { return x.w !== word.w; });
   var picked = [], used = {};
+  /* 第零优先：噩梦关卡里，出题者在挑战码里指定的混淆词 */
+  var poisonConf = run.poison && run.poison.confuseMap && run.poison.confuseMap[word.w];
+  if (poisonConf) {
+    poisonConf.forEach(function (ow) {
+      if (picked.length >= n || used[ow]) return;
+      for (var ci = 0; ci < cands.length; ci++) {
+        if (cands[ci].w === ow) { used[ow] = 1; picked.push(cands[ci]); break; }
+      }
+    });
+  }
   /* 第一优先：你曾经混淆过的词 */
   var conf = (save.confuse || {})[word.w];
   if (conf) {
@@ -1257,30 +2200,48 @@ function typeTimeFactor(t) { return t === 'spell' ? 1.6 : (t === 'listen' ? 1.2 
 
 /* ========================= 战斗状态 ========================= */
 var run = null;
+var runEpoch = 0;   /* 局次号：每次 startRun +1，旧局遗留的延时回调用它识别自己已过期 */
 var setupMode = 'adventure';
 
-function coinMult() { return 1 + 0.2 * (save.upgrades.coin || 0) + (run && run.pet === 'dragon' ? 0.15 : 0); }
+function coinMult() {
+  var m = 1 + 0.2 * (save.upgrades.coin || 0) + 0.1 * talentLv('magnet') + (run && run.pet === 'dragon' ? 0.15 : 0);
+  if (activeMod() === 'greed') m += 0.5;   /* 贪婪词缀：金币 +50% */
+  if (activeMod() === 'famine') m *= 0.5;  /* 贫瘠词缀：金币收益减半 */
+  return m;
+}
 function perQuestionSec() {
   var d = run.diff.sec;
   var base;
   if (run.mode === 'adventure') base = d - (run.stage - 1) * 0.3 + (save.upgrades.time || 0) * 2 + (run.stageBonus || 0);
   else if (run.mode === 'endless') base = d - run.kills * 0.12 + (save.upgrades.time || 0) * 2;
   else base = d + (save.upgrades.time || 0) * 2;
+  base += talentLv('calm');                 /* 天赋：从容不迫 +1s/级 */
   if (run.pet === 'owl') base *= 1.15;
   if (run.mode === 'adventure' && run.bossStage && run.bossMod === 'haste') base *= 0.75;
+  if (run.mode === 'expedition' && run.bossMod === 'haste') base *= 0.75;
+  if (run.poison && run.poisonAffix === 'haste') base *= 0.75;
   if (run.mode === 'adventure' && run.bossStage && run.enrage) base *= 0.88;
+  if (activeMod() === 'freeze') base -= 4;  /* 词缀：时停，固定偷走 4 秒 */
   base += (run.timerAdj || 0);
   return Math.max(4, base);
 }
 
 /* 是否为扣血/守城类模式 */
 function combatLike() {
-  return run && (run.mode === 'adventure' || run.mode === 'endless');
+  return run && (run.mode === 'adventure' || run.mode === 'endless' || run.mode === 'expedition');
+}
+/* 当前生效的 BOSS 词缀：冒险 BOSS 关、远征关卡或噩梦毒池的挑战码词缀 */
+function activeMod() {
+  if (!run) return '';
+  if (run.mode === 'adventure' && run.bossStage && run.bossMod) return run.bossMod;
+  if (run.mode === 'expedition' && run.bossMod) return run.bossMod;
+  if (run.poison && run.poisonAffix) return run.poisonAffix;
+  return '';
 }
 
 function startRun(mode, listIds, diffKey, explicitPool) {
   var diff = DIFFS[diffKey] || DIFFS.normal;
-  var unitCtx = (mode === 'review' || mode === 'drill') ? null : resolveUnitCtx(listIds);
+  var unitCtx = (mode === 'review' || mode === 'drill' || mode === 'expedition') ? null : resolveUnitCtx(listIds);
   var pool;
   if (explicitPool) pool = explicitPool.slice();
   else if (mode === 'review' || mode === 'drill') pool = buildReviewPool(listIds);
@@ -1292,14 +2253,22 @@ function startRun(mode, listIds, diffKey, explicitPool) {
     mode: mode, listIds: listIds, diff: diff, diffKey: diffKey,
     pool: pool, stage: 1, stageSize: 6, killedInStage: 0, stageBonus: 0, bossStage: false, bossMod: '',
     kills: 0, answered: 0, correct: 0, combo: 0, maxCombo: 0,
-    hp: maxHp, maxHp: maxHp, shields: save.upgrades.shield || 0, hints: 0, hgStack: 0,
+    hp: maxHp, maxHp: maxHp, shields: save.upgrades.shield || 0, hints: talentLv('sage'), hgStack: 0,
     coinsEarned: 0, reinforce: [], recent: [], records: [], recordsBy: {},
     monster: null, q: null, pendingRevenge: false, reviewTotal: 12,
-    pet: save.pet || '', timerAdj: 0, hist: [], wrongTotal: 0,
+    pet: save.pet || '', timerAdj: 0, hist: [], wrongTotal: 0, timeline: [],
+    willUsed: false, smiteN: 0, packId: '', expMods: null, expScore: 0,
     planQueue: (mode === 'plan') ? pool.slice() : null,
     unitCtx: unitCtx || null, unitSet: null,
     pressure: 0
   };
+  runEpoch++;   /* 旧局的延时回调（记忆卡/追击/击杀链）从此全部过期 */
+  if (mode === 'expedition') {
+    var ex = planExpedition(listIds);   /* 当日种子词池 + 词缀 schedule，覆盖普通词池 */
+    run.pool = ex.pool;
+    run.listIds = ex.ids;
+    run.expMods = ex.expMods;
+  }
   if (run.unitCtx && run.unitCtx.words.length) {
     run.unitSet = {};
     run.unitCtx.words.forEach(function (x) { run.unitSet[x.w] = 1; });
@@ -1317,7 +2286,40 @@ function startRun(mode, listIds, diffKey, explicitPool) {
   if (mode === 'plan') { ensurePlanDay(); save.planDay.total = pool.length; persist(); }
 
   showScreen('scr-battle');
-  $('hero-emoji').textContent = (mode === 'adventure' || mode === 'endless') ? '🏰' : '🧙‍♂️';
+  /* 清空上一局残留的题目/怪物/特效：横幅期间旧题还挂在 DOM 上会被误点误读 */
+  $('q-type').textContent = '';
+  $('q-prompt').textContent = '';
+  $('q-prompt').className = 'q-prompt';
+  $('q-options').innerHTML = '';
+  $('q-options').className = 'q-options';
+  $('q-options').hidden = false;
+  $('q-spell').hidden = true;
+  $('q-memo').hidden = true;
+  $('q-memo').innerHTML = '';
+  $('btn-replay').hidden = true;
+  $('btn-hint').hidden = true;
+  $('btn-memo').hidden = true;
+  spellState = null;
+  $('monster-emoji').textContent = '';
+  $('monster-emoji').className = 'monster-emoji';
+  $('monster-name').textContent = '';
+  $('monster-name').className = 'monster-name';
+  $('monster-hp-fill').style.width = '0%';
+  $('boss-mod').hidden = true;
+  $('timer-fill').style.width = '100%';
+  $('timer-fill').className = 'timer-fill';
+  $('fx-layer').innerHTML = '';
+  /* 视觉互动层复位：光环 canvas / 词根符文 / 蓄力 / 城堡裂纹火光 / BOSS 氛围 / 连击热浪 */
+  cancelCharge();
+  paintMonsterVisual(null);
+  $('monster-figure').classList.remove('boss');
+  $('monster-rune').hidden = true;
+  $('btn-charge').hidden = true;
+  $('pressure-wrap').classList.remove('dmg-1', 'dmg-2', 'dmg-3');
+  Array.prototype.forEach.call($('castle-fx').querySelectorAll('.castle-smoke,.castle-spark'), function (n) { n.remove(); });
+  castleSmokeOn = false;
+  $('scr-battle').classList.remove('boss-live', 'combo-heat-1', 'combo-heat-2', 'combo-heat-3');
+  $('hero-emoji').textContent = (mode === 'adventure' || mode === 'endless' || mode === 'expedition') ? '🏰' : '🧙‍♂️';
   $('hero-hp-text').textContent = (mode === 'review') ? '📖 练习模式 · 不扣血'
     : (mode === 'plan' ? '🎯 今日计划 · 不扣血'
     : (mode === 'drill' ? '🔥 强化训练 · 不扣血' : '🏰 城防 100%'));
@@ -1344,15 +2346,27 @@ function startRun(mode, listIds, diffKey, explicitPool) {
 function beginStage() {
   run.killedInStage = 0;
   run.enrage = false;
-  run.bossStage = (run.mode === 'adventure' && run.stage % 5 === 0);
-  run.bossMod = run.bossStage ? rnd(Object.keys(BOSS_MODS)) : '';
-  run.stageSize = run.bossStage ? 1 : Math.max(4, save.sessionSize || 10);
+  if (run.mode === 'expedition') {
+    var exSt = EXP_STAGES[Math.min(run.stage - 1, EXP_STAGES.length - 1)];
+    run.bossStage = exSt.boss;
+    run.bossMod = exSt.mod < 0 ? '' : (run.expMods || ['haste', 'rage'])[exSt.mod];
+    run.stageSize = exSt.size;
+  } else {
+    run.bossStage = (run.mode === 'adventure' && run.stage % 5 === 0);
+    run.bossMod = run.bossStage ? rnd(Object.keys(BOSS_MODS)) : '';
+    run.stageSize = run.bossStage ? 1 : Math.max(4, save.sessionSize || 10);
+  }
+  markModSeen(run.bossMod);   /* 词缀图鉴：记下今天遭遇的词缀 */
   run.stageBonus = run.hgStack;  // 消耗沙漏
   run.hgStack = 0;
 
   if (run.pet === 'fairy' && run.mode === 'adventure' && run.pressure > 0) {
     addPressure(-5);
     fx('🧚 宠修城墙 压境-5%', 'good', 68, 60);
+  }
+  if (talentLv('medic') && combatLike() && run.pressure > 0) {
+    addPressure(-3 * talentLv('medic'));
+    fx('🧰 战地抢修 压境-' + (3 * talentLv('medic')) + '%', 'good', 68, 45);
   }
 
   var themeIdx = (run.stage - 1) % THEMES.length;
@@ -1368,6 +2382,11 @@ function beginStage() {
     showBanner('⚠️ 第 ' + run.stage + ' 关 · BOSS 战',
       mod.icon + ' ' + mod.name + '：' + mod.desc + '<br>' + theme[1] + ' · ' + story,
       function () { nextMonster(); }, 2100);
+  } else if (run.bossMod) {
+    var em = BOSS_MODS[run.bossMod];   /* 远征精英关：整关带词缀，先读效果再开打 */
+    showBanner('⚠️ 第 ' + run.stage + ' 关 · 精英来袭',
+      em.icon + ' ' + em.name + '：' + em.desc + '<br>' + theme[1] + ' · ' + story,
+      function () { nextMonster(); }, 2100);
   } else {
     var sub = story + (run.stage === 1 ? '<br>敌军已兵临城下，快速答对击退他们！' : '');
     showBanner('第 ' + run.stage + ' 关 · ' + theme[1], sub, function () { nextMonster(); }, 1500);
@@ -1377,23 +2396,47 @@ function beginStage() {
 function spawnMonster() {
   var boss = run.bossStage;
   var hp;
-  if (boss) hp = run.stage >= 15 ? 4 : 3;
+  if (run.poison) hp = 1;   /* 噩梦关卡：真实血量在出题时按毒词掌握度反向换算 */
+  else if (boss) hp = run.stage >= 15 ? 4 : 3;
   else {
-    var tough = (run.mode === 'endless') ? run.kills >= 12 : run.stage >= 6;
+    var tough = (run.mode === 'endless') ? run.kills >= 12 : (run.mode === 'expedition' ? run.stage >= 2 : run.stage >= 6);
     hp = (combatLike() && tough && Math.random() < 0.25) ? 2 : 1;
   }
   var pick = boss ? rnd(BOSSES) : rnd(MONSTERS);
-  run.monster = { emoji: pick[0], name: pick[1], hp: hp, maxHp: hp, boss: boss };
+  run.monster = { emoji: pick[0], name: pick[1], hp: hp, maxHp: hp, boss: boss, hpSet: !run.poison,
+    shield: (activeMod() === 'ward') ? 1 : 0 };   /* 石肤词缀：怪物带 1 层护盾 */
   var me = $('monster-emoji');
   me.textContent = pick[0];
-  me.className = 'monster-emoji' + (boss ? ' boss' : '');
-  $('monster-name').textContent = pick[1] + (boss ? '' : ' · Lv.' + Math.max(1, Math.floor((run.mode === 'endless' ? run.kills : run.stage * 2) / 2)));
+  me.className = 'monster-emoji' + (boss ? ' boss boss-enter' : '');
+  var fig = $('monster-figure');
+  fig.classList.toggle('boss', boss);
+  $('scr-battle').classList.toggle('boss-live', boss);
+  if (boss) {
+    /* BOSS 登场：从天而降砸落 + 冲击环 + 轻震 + 低音鼓点，存在感拉满 */
+    shakeApp(true);
+    Sfx.tone(90, .22, 'square', 0, .08);
+    setTimeout(function () {
+      if (run && run.monster && run.monster.boss) { ringAtMonster(false); shakeApp(true); }
+    }, 380);
+    setTimeout(function () {
+      var cur = $('monster-emoji');
+      if (cur && cur.classList.contains('boss-enter')) cur.classList.remove('boss-enter');
+    }, 800);
+  }
+  paintMonsterVisual({ boss: boss, hp: hp, pos: '', lv: 0 });   /* 先画基础环，出题后按词性/掌握度重绘 */
+  $('monster-name').textContent = run.poison ? ('☠️ ' + pick[1])
+    : pick[1] + (boss ? '' : ' · Lv.' + Math.max(1, Math.floor((run.mode === 'endless' ? run.kills : run.stage * 2) / 2)));
   $('monster-name').className = boss ? 'monster-name boss-name' : 'monster-name';
   var modEl = $('boss-mod');
   if (boss && run.bossMod) {
     var bm = BOSS_MODS[run.bossMod];
     modEl.innerHTML = bm.icon + ' ' + bm.name;
     modEl.title = bm.desc;
+    modEl.hidden = false;
+  } else if (run.poison && run.poisonAffix && BOSS_MODS[run.poisonAffix]) {
+    var pm = BOSS_MODS[run.poisonAffix];
+    modEl.innerHTML = pm.icon + ' ' + pm.name;
+    modEl.title = pm.desc + '（挑战码词缀）';
     modEl.hidden = false;
   } else {
     modEl.hidden = true;
@@ -1415,9 +2458,21 @@ function askNext(sameWord, avoidType) {
   } else {
     word = pickWord();
   }
+  /* 噩梦关卡：怪物血量按出题者对该词的掌握度反向换算（lv 越低怪越硬） */
+  if (run.poison && run.monster && !run.monster.hpSet) {
+    var lv = (run.poison.lvMap && run.poison.lvMap[word.w] !== undefined) ? run.poison.lvMap[word.w] : 0;
+    var php = Math.max(1, Math.min(4, 5 - lv));
+    run.monster.hp = php;
+    run.monster.maxHp = php;
+    run.monster.hpSet = true;
+    run.monster.word = word.w;
+    fx('☠️ 硬度 ' + php, 'bad', 25, 18);
+    updateHUD();
+  }
   var question = buildQuestion(word, avoidType);
   if (sameWord) question.retries = (run.q ? run.q.retries : 0) + 1;
   run.q = question;
+  paintMonsterVisual(monsterTraitOpts());   /* 词性光环 + 血量角 + 掌握度热度（出题词定了才画） */
   renderQuestion();
 }
 function renderQuestion() {
@@ -1425,6 +2480,8 @@ function renderQuestion() {
   /* 移开按钮焦点：避免按 Enter/空格 误触发上一个点过的按钮 */
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
   $('q-type').textContent = TYPE_LABEL[q.type] + (q.isRevenge ? ' 　😈 复仇怪兽来袭！' : '');
+  $('monster-rune').hidden = true;   /* 词根符文只在答题后揭示 */
+  $('btn-charge').hidden = !combatLike();   /* 蓄力一击：仅守城类模式 */
   $('q-options').innerHTML = '';
   $('q-options').className = 'q-options';
   $('q-spell').hidden = true;
@@ -1433,11 +2490,14 @@ function renderQuestion() {
   $('btn-hint').hidden = true;
   $('btn-hint').disabled = run.hints <= 0;
   $('hint-count').textContent = run.hints;
+  /* 沉默词缀：提示卡被封印 */
+  var silenced = activeMod() === 'silence';
+  if (silenced) { $('btn-hint').disabled = true; $('btn-spell-hint').disabled = true; }
 
   /* 记忆提示（词根 + 图像）：有内容才显示按钮，每题重置 */
   var memo = memoOf(q.word.w);
   $('q-memo').hidden = true;
-  $('btn-memo').hidden = !(memo.emoji || memo.code);
+  $('btn-memo').hidden = silenced || !(memo.emoji || memo.code);
   var memoHtml = '';
   if (memo.emoji) memoHtml += '<span class="memo-emoji">' + memo.emoji + '</span>';
   var body = '';
@@ -1462,7 +2522,7 @@ function renderQuestion() {
     prompt.textContent = q.word.m;
     $('q-options').hidden = true;
     $('q-spell').hidden = false;
-    $('btn-spell-hint').disabled = run.hints <= 0;
+    $('btn-spell-hint').disabled = run.hints <= 0 || activeMod() === 'silence';
     renderSpell();
   }
 
@@ -1475,6 +2535,16 @@ function renderQuestion() {
       $('q-options').appendChild(b);
     });
     if (run.hints > 0) $('btn-hint').hidden = false;
+    /* 迷雾词缀：开题前 2 秒选项被雾遮住，硬猜有风险，先想词根再等雾散 */
+    if (activeMod() === 'fog') {
+      $('q-options').classList.add('fogged');
+      var fogSeq = runEpoch;
+      setTimeout(function () {
+        if (!run || runEpoch !== fogSeq) return;
+        var el = $('q-options');
+        if (el && !(run.q && run.q.locked)) el.classList.remove('fogged');
+      }, 2000);
+    }
   }
 
   startTimer(perQuestionSec() * typeTimeFactor(q.type));
@@ -1535,6 +2605,7 @@ function spellBack() {
 function spellHint() {
   if (!run || !run.q || run.q.locked || run.q.type !== 'spell') return;
   if (run.hints <= 0) return;
+  if (activeMod() === 'silence') { toast('🔕 沉默词缀：提示被封印！'); return; }
   var q = run.q;
   var need = q.word.w[spellState.picked.length];
   for (var i = 0; i < q.shuffled.length; i++) {
@@ -1585,6 +2656,7 @@ function onChoice(i, btn) {
 
 function useHint() {
   if (!run || !run.q || run.q.locked || run.hints <= 0) return;
+  if (activeMod() === 'silence') { toast('🔕 沉默词缀：提示被封印！'); return; }
   var q = run.q;
   if (q.type !== 'c2e' && q.type !== 'e2c' && q.type !== 'listen') return;
   var wrongIdx = [];
@@ -1610,7 +2682,18 @@ function addPressure(n) {
   run.pressure = Math.min(100, run.pressure + n);
   updateHUD();
   if (run.pressure >= 100) {
+    /* 不灭意志天赋：每局一次，城破瞬间稳住城墙 */
+    if (talentLv('will') && !run.willUsed) {
+      run.willUsed = true;
+      run.pressure = 70;
+      updateHUD();
+      fx('🕯️ 不灭意志！城墙稳住了！', 'good', 50, 30);
+      toast('🕯️ 天赋「不灭意志」触发：压境回落到 70%');
+      return;
+    }
     stopTimer();
+    shakeApp();
+    fxScreenVignette(true);
     fx('💥 城墙失守！', 'bad', 50, 30);
     setTimeout(function () { if (run && !run.ended) endRun('overrun'); }, 700);
   }
@@ -1633,7 +2716,7 @@ function tick() {
   f.style.width = (r * 100) + '%';
   f.className = 'timer-fill' + (r < 0.2 ? ' danger' : (r < 0.45 ? ' warn' : ''));
   /* 大军压境：答题期间敌军持续推进，关卡越高推得越快 */
-  if (run && (run.mode === 'adventure' || run.mode === 'endless') && run.q && !run.q.locked && run.pressure < 100) {
+  if (run && (run.mode === 'adventure' || run.mode === 'endless' || run.mode === 'expedition') && run.q && !run.q.locked && run.pressure < 100) {
     var creep = run.mode === 'endless' ? 0.5 + run.kills * 0.04 : 0.45 + (run.stage - 1) * 0.07;
     addPressure(creep * dt);
   }
@@ -1671,6 +2754,10 @@ function resolve(ok, timedOut) {
   var q = run.q;
   q.locked = true;
   stopTimer();
+  cancelCharge();               /* 答题已锁定：进行中的蓄力作废 */
+  $('btn-charge').hidden = true;
+  var fogEl = $('q-options');   /* 迷雾词缀：作答即散雾，保证对错答案看得清 */
+  if (fogEl) fogEl.classList.remove('fogged');
   run.answered++;
   bumpToday();
   logAnswer(ok);
@@ -1692,11 +2779,22 @@ function resolve(ok, timedOut) {
     else if (rate <= 0.5) run.timerAdj = Math.min(2, (run.timerAdj || 0) + 0.4);
   }
 
+  /* 贪婪词缀：金币 +50% 的代价——每答 1 题敌军压境 +2% */
+  if (activeMod() === 'greed' && combatLike()) addPressure(2);
+
   if (ok) {
     run.correct++;
     run.combo++;
+    if (activeMod() === 'curse' && run.combo > 3) run.combo = 3;   /* 诅咒词缀：连击封顶 3 连 */
     run.maxCombo = Math.max(run.maxCombo, run.combo);
     rec.ok++;
+    run.timeline.push({ ok: 1, combo: run.combo });   /* 结算页节奏图数据 */
+    addXp(2);
+    /* 噩梦毒池：按实际作答的词记攻克——怪物血量>1 时题目会在毒词池随机轮转，
+       若等 killMonster 只记怪物首题绑定的词，战报/成绩码会漏记后答对的毒词 */
+    if (run.poison && run.poison.words.indexOf(word.w) >= 0) {
+      run.poisonCleared[word.w] = true;
+    }
 
     save.stats.maxCombo = Math.max(save.stats.maxCombo, run.combo);
     bumpTask('q_correct');
@@ -1705,9 +2803,9 @@ function resolve(ok, timedOut) {
     setTask('combo_hit', run.combo);
     if (save.mastery[word.w] && save.mastery[word.w].seen === 1) bumpTask('new_words');
     if (run.combo > 0 && run.combo % 5 === 0) comboBurst();
-    /* 答对击退敌军：连击越高退得越多 */
-    if (run.mode === 'adventure' || run.mode === 'endless') {
-      addPressure(-(10 + Math.min(run.combo, 10) * 0.8));
+    /* 答对击退敌军：连击越高退得越多（连击之魂天赋加成） */
+    if (run.mode === 'adventure' || run.mode === 'endless' || run.mode === 'expedition') {
+      addPressure(-(10 + Math.min(run.combo, 10) * 0.8) * (1 + 0.1 * talentLv('soul')));
     }
     /* 升到 3 星 = 攻克错题 */
     if (save.mastery[word.w] && save.mastery[word.w].lv >= 3 && save.wrongBook[word.w]) {
@@ -1727,21 +2825,35 @@ function resolve(ok, timedOut) {
 
     Sfx.correct(run.combo);
     Sfx.coin();
-    heroAttackFx('-' + (run.monster.boss ? '1⚡' : '1'), gain);
-    run.monster.hp--;
+    /* 蓄雷一击：每答对 6 题，下一击伤害翻倍；石肤词缀的护盾抵挡第一次伤害 */
+    var dmg = 1;
+    if (talentLv('smite')) {
+      run.smiteN++;
+      if (run.smiteN >= 6) { run.smiteN = 0; dmg = 2; fx('⚡ 蓄雷一击！伤害翻倍！', 'good', 25, 18); }
+    }
+    heroAttackFx('-' + (run.monster.boss ? dmg + '⚡' : dmg), gain, dmg === 2);
+    if (run.monster.shield > 0) {
+      run.monster.shield--;
+      fx('🪨 石肤护盾抵挡了伤害！', 'bad', 25, 20);
+    } else {
+      run.monster.hp -= dmg;
+    }
     if (run.monster.boss && run.monster.hp === 1 && !run.enrage) {
       run.enrage = true;
       fx('💢 BOSS 濒死狂暴！下一题提速！', 'bad', 25, 12);
     }
     updateHUD();
+    paintMonsterVisual(monsterTraitOpts());   /* 血量变了：重画难度之角 */
+    revealRune(word);                          /* 答完题：亮出词性 + 词根符文 */
     TTS.speak(word.w, false);
 
     if (run.monster.hp <= 0) {
       killMonster();
     } else {
       fx('BOSS 受伤了！再来！', 'good', 25, 22);
+      var hitSeq = runEpoch;
       setTimeout(function () {
-        if (!run || run.ended) return;
+        if (!run || run.ended || runEpoch !== hitSeq) return;
         askNext(false, null);
       }, 700);
     }
@@ -1749,6 +2861,7 @@ function resolve(ok, timedOut) {
     run.combo = 0;
     run.wrongTotal++;
     rec.wrong++;
+    run.timeline.push({ ok: 0, combo: 0 });   /* 结算页节奏图数据 */
     /* 错题入册（跨局累积） */
     var wb = save.wrongBook[word.w] || (save.wrongBook[word.w] = { n: 0, t: 0 });
     wb.n++;
@@ -1759,12 +2872,28 @@ function resolve(ok, timedOut) {
       fx('🧲 BOSS 汲取回血 +1', 'bad', 22, 18);
       updateHUD();
     }
+    if (run.mode === 'expedition' && run.bossMod === 'drain' && run.monster && run.monster.hp < run.monster.maxHp) {
+      run.monster.hp++;   /* 远征精英关：汲取词缀对整关怪物生效 */
+      fx('🧲 汲取词缀 怪物回血 +1', 'bad', 22, 18);
+      updateHUD();
+    }
+    if (run.poison && run.poisonAffix === 'drain' && run.monster && run.monster.hp < run.monster.maxHp) {
+      run.monster.hp++;
+      fx('🧲 毒素反噬 怪物回血 +1', 'bad', 22, 18);
+      updateHUD();
+    }
     Sfx.wrong();
     $('q-card').classList.add('shake');
     setTimeout(function () { $('q-card').classList.remove('shake'); }, 450);
+    fxScreenVignette(true);          /* 全屏红色边缘一闪：失误警示 */
+    revealRune(word);
+    if (combatLike()) castleHitFx(); /* 城堡被撞了一下：火花 + 抖动 */
     updateHUD();
 
+    /* 局次守卫：撤退/城破/新开局后，旧局的记忆卡链不得再弹出或续问 */
+    var missSeq = runEpoch;
     setTimeout(function () {
+      if (!run || run.ended || runEpoch !== missSeq) return;
       showMemCard(word, function () {
         monsterAttack(function () {
           if (q.retries < 1) {
@@ -1772,7 +2901,7 @@ function resolve(ok, timedOut) {
           } else {
             var queued = run.reinforce.some(function (r) { return r.w === word.w; });
             if (!queued && combatLike()) {
-              run.reinforce.push({ w: word.w, m: word.m, at: run.answered + 4 });
+              run.reinforce.push({ w: word.w, m: word.m, at: run.answered + 4 + 2 * talentLv('focus') });
             }
             askNext(false, null);
           }
@@ -1782,7 +2911,7 @@ function resolve(ok, timedOut) {
   }
 }
 
-function heroAttackFx(dmgText, coinGain) {
+function heroAttackFx(dmgText, coinGain, crit) {
   var hero = $('hero-emoji');
   hero.classList.remove('attack');
   void hero.offsetWidth;
@@ -1792,21 +2921,33 @@ function heroAttackFx(dmgText, coinGain) {
     mon.classList.remove('hit');
     void mon.offsetWidth;
     mon.classList.add('hit');
+    slashAtMonster();               /* 斩击弧线扫过怪物 */
   }, 180);
-  fx(dmgText, 'good', 22, 30);
+  fx(dmgText, crit ? 'crit' : 'good', 22, 30);
   if (coinGain) fx('🪙 +' + coinGain, '', 30, 42);
 }
 
 function monsterAttack(cb) {
-  if (run.mode === 'review' || run.mode === 'plan' || run.mode === 'drill') { setTimeout(cb, 250); return; }
+  var atkSeq0 = runEpoch;
+  if (run.mode === 'review' || run.mode === 'plan' || run.mode === 'drill') {
+    setTimeout(function () { if (!run || run.ended || runEpoch !== atkSeq0) return; cb(); }, 250);
+    return;
+  }
   var mon = $('monster-emoji');
   /* 敌军攻势：换算成压境值（城墙加固 / 玄龟减伤） */
   var spike = run.diff.dmg * 2.2 + (run.monster.boss ? 4 : 0);
   if (run.monster.boss && run.bossMod === 'rage') spike *= 1.3;
   if (run.monster.boss && run.bossMod === 'thorn') spike += 5;
+  if (run.poison && run.poisonAffix === 'rage') spike += 3;
+  if (run.poison && run.poisonAffix === 'thorn') spike += 1;
+  if (run.mode === 'expedition' && run.bossMod === 'rage') spike += 3;    /* 远征精英关：狂暴对整关生效 */
+  if (run.mode === 'expedition' && run.bossMod === 'thorn') spike += 1;
+  if (activeMod() === 'tide') spike += Math.min(15, run.answered);   /* 狂潮：每答 1 题攻势 +1% */
   spike *= (1 - 0.08 * (save.upgrades.hp || 0));
+  spike *= (1 - 0.05 * talentLv('vigor'));                            /* 天赋：钢铁城墙 */
   if (run.pet === 'turtle') spike *= 0.8;
-  var after = function () { setTimeout(cb, 550); };
+  var atkSeq = runEpoch;   /* 若本局在 550ms 内终结/换局，不再续问旧题 */
+  var after = function () { setTimeout(function () { if (!run || run.ended || runEpoch !== atkSeq) return; cb(); }, 550); };
 
   if (run.shields > 0) {
     run.shields--;
@@ -1823,6 +2964,7 @@ function monsterAttack(cb) {
   hero.classList.add('hurt');
   Sfx.hurt();
   shakeApp();
+  castleHitFx();   /* 城堡吃了一击：火花 + 抖动（裂纹分档由 updateCastleViz 依据压境值管理） */
   fx('敌军压境 +' + Math.round(spike) + '%', 'bad', 68, 45);
   addPressure(spike);
   if (run.pressure >= 100) return;   /* 城破流程已由 addPressure 触发 */
@@ -1831,22 +2973,43 @@ function monsterAttack(cb) {
 
 function killMonster() {
   var m = run.monster;
+  /* 不死词缀：每只怪第一次被击倒时以 1 血爬起来 */
+  if (activeMod() === 'molt' && !m.moltUsed) {
+    m.moltUsed = true;
+    m.hp = 1;
+    fx('🧟 不死词缀：它又爬起来了！', 'bad', 25, 22);
+    updateHUD();
+    var moltSeq = runEpoch;
+    setTimeout(function () {
+      if (!run || run.ended || runEpoch !== moltSeq || run.monster !== m) return;
+      askNext(false, null);
+    }, 800);
+    return;
+  }
+  /* 毒词攻克已在 resolve 按实际答对的词记账（题目会在毒词池轮转，怪物首题绑定的词≠实际攻克） */
   run.kills++;
   save.stats.kills++;
+  addXp(m.boss ? 8 : 1);
   bumpTask('kill_total');
+  if (run.mode === 'expedition') bumpTask('exp_kill');
   if (m.boss) { save.stats.bosses++; bumpTask('boss_kill'); }
   var me = $('monster-emoji');
   me.classList.add('dead');
   Sfx.kill();
-  if (m.boss) Confetti.burst(70);
-  var bonus = Math.round((m.boss ? 40 : 10) * coinMult());
+  killBurstFx();   /* 定点粒子爆裂 + 冲击环 + 轻震 */
+  if (m.boss) {
+    $('scr-battle').classList.remove('boss-live');
+    Confetti.burst(70);
+  }
+  var bonus = Math.round((m.boss ? 40 : 10) * coinMult() * (m.boss ? (1 + 0.25 * talentLv('slayer')) : 1));
   save.coins += bonus;
   run.coinsEarned += bonus;
   fx(m.boss ? 'BOSS 击败！🪙+' + bonus : '击杀！🪙+' + bonus, 'good', 25, 25);
   updateHUD();
 
+  var killSeq = runEpoch;
   setTimeout(function () {
-    if (!run || run.ended) return;
+    if (!run || run.ended || runEpoch !== killSeq) return;
     if (run.mode === 'review' || run.mode === 'plan' || run.mode === 'drill') {
       if (run.mode === 'plan') { ensurePlanDay(); save.planDay.done = run.kills; persist(); }
       if (run.kills >= run.reviewTotal) { endRun('done'); return; }
@@ -1877,10 +3040,18 @@ function stageClear() {
   var bonus = Math.round((20 + run.stage * 2) * coinMult());
   save.coins += bonus;
   run.coinsEarned += bonus;
-  save.best.adventure = Math.max(save.best.adventure, run.stage);
+  addXp(8);
+  if (run.mode === 'adventure' && !run.poison) save.best.adventure = Math.max(save.best.adventure, run.stage);
+  if (run.packId && !run.poison) markPackDone();   /* 主题挑战包：通过第 1 关那一刻即计完成 */
   persist();
   Sfx.levelup();
   Confetti.burst(60);
+  if (run.poison) { endRun('done'); return; }   /* 噩梦关卡一战定胜负，不进商店 */
+  if (run.mode === 'expedition') {
+    if (run.stage >= EXP_STAGES.length) { endRun('done'); return; }   /* BOSS 关拿下：远征告捷 */
+    openShop();
+    return;
+  }
   openShop();
 }
 
@@ -1893,6 +3064,7 @@ function openShop() {
   var wrap = $('shop-items');
   wrap.innerHTML = '';
   SHOP_ITEMS.forEach(function (item) {
+    var price = Math.max(1, Math.round(item.price * (1 - 0.15 * talentLv('haggle'))));   /* 天赋：行囊议价 */
     var div = document.createElement('div');
     div.className = 'shop-item';
     var owned = item.id === 'shield' ? '（现有 ' + run.shields + '）'
@@ -1906,11 +3078,11 @@ function openShop() {
       '<div class="si-owned">' + owned + '</div>';
     var btn = document.createElement('button');
     btn.className = 'btn btn-primary';
-    btn.textContent = '🪙 ' + item.price;
-    btn.disabled = save.coins < item.price;
+    btn.textContent = '🪙 ' + price;
+    btn.disabled = save.coins < price;
     btn.onclick = function () {
-      if (save.coins < item.price) return;
-      save.coins -= item.price;
+      if (save.coins < price) return;
+      save.coins -= price;
       if (item.id === 'potion') run.pressure = Math.max(0, run.pressure - 25);
       if (item.id === 'shield') run.shields++;
       if (item.id === 'hourglass') run.hgStack += 3;
@@ -2003,20 +3175,72 @@ function openShop() {
 }
 
 /* ========================= 结算 ========================= */
+/* 主题挑战包完成：按「通过第 1 关」计（stageClear 通关那一刻调用；endRun 非撤退结局兜底）。
+   packDone 只记首次（旧成就 pack1 兼容），packDoneMap 按包记档案（成就「包罗万象」） */
+function markPackDone() {
+  if (!run || !run.packId) return;
+  if (!save.stats.packDoneMap) save.stats.packDoneMap = {};
+  var firstEver = !save.stats.packDone;
+  var firstOfThis = !save.stats.packDoneMap[run.packId];
+  if (!firstEver && !firstOfThis) return;
+  save.stats.packDone = 1;
+  save.stats.packDoneMap[run.packId] = 1;
+  persist();
+  if (firstEver) toast('🧩 主题挑战包完成成就达成！');
+  else if (firstOfThis) toast('🧩 「' + (packById(run.packId) || {}).name + '」打包完成！成就 +1');
+  checkAch();
+}
 function endRun(reason) {
   stopTimer();
   BGM.stop();
+  cancelCharge();
   $('memcard').hidden = true;
   memCb = null;
   $('banner').hidden = true;
   if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
   save.stats.runs++;
   bumpTask('run_any');
+  /* 主题挑战包：通关第 1 关那一刻已在 stageClear 计完成（含之后撤退）；
+     此处兜底「已进第 2 关（必经通关）后的非撤退结局」，第 1 关未通关非撤退结束不计 */
+  if (run.packId && run.stage >= 2 && reason !== 'quit') markPackDone();
+  if (reason === 'done') addXp(10);
   if (run.mode === 'review' || run.mode === 'drill') bumpTask('review_done');
   if (run.answered >= 10 && run.wrongTotal === 0) save.stats.perfects++;
+  /* 每日远征：积分入档 + 当日首通奖励（积分=击杀×10+答对×2+最高连击×5+通关100） */
+  if (run.mode === 'expedition') {
+    var sc = expScore(reason);
+    run.expScore = sc;
+    var today = expDayStamp();
+    var wasCleared = expTodayCleared();   /* 今天已经通关过 */
+    var oldBest = (save.expedition && save.expedition.date === today) ? (save.expedition.best || 0) : 0;
+    save.expedition = {
+      date: today,
+      best: Math.max(oldBest, sc),
+      clearDate: (wasCleared || reason === 'done') ? today : ''   /* 跨日后旧 clearDate 一律作废 */
+    };
+    if (reason === 'done') {
+      save.stats.expWins = (save.stats.expWins || 0) + 1;
+      if (!wasCleared) {
+        var eb = 80;
+        save.coins += eb;
+        run.coinsEarned += eb;
+        Confetti.burst(90);
+        toast('🚀 今日远征首通！奖励 🪙' + eb);
+      }
+    } else if (oldBest > 0 && sc > oldBest) {
+      toast('🚀 远征新纪录：' + sc + ' 分！');
+    }
+    persist();
+  }
   checkAch();
   var titles = { dead: '💀 你倒下了…', overrun: '🏰 城墙失守…', quit: '🏳️ 撤退整顿', done: '🎉 复习完成！' };
   if (run.mode === 'drill' && reason === 'done') titles.done = '🔥 强化训练完成！';
+  if (run.mode === 'expedition') {
+    if (reason === 'done') titles.done = '🚀 远征告捷！';
+    else if (reason === 'quit') titles.quit = '🏳️ 远征撤退';
+  }
+  if (run.poison && reason === 'done') titles.done = '☠️ 噩梦通关！';
+  if (run.poison && reason === 'quit') titles.quit = '🏳️ 逃出毒池';
   if (run.mode === 'plan' && reason === 'done') {
     titles.done = '🎯 今日计划完成！';
     ensurePlanDay();
@@ -2032,7 +3256,7 @@ function endRun(reason) {
   }
   $('result-title').textContent = titles[reason] || '⚔️ 冒险结束';
 
-  if (run.mode === 'adventure') {
+  if (run.mode === 'adventure' && !run.poison) {
     save.best.adventure = Math.max(save.best.adventure, run.stage);
   } else if (run.mode === 'endless') {
     save.best.endless = Math.max(save.best.endless, run.kills);
@@ -2041,8 +3265,11 @@ function endRun(reason) {
 
   var acc = run.answered ? Math.round(run.correct / run.answered * 100) : 0;
   var stats = [];
-  if (run.mode === 'adventure') stats.push('🏆 抵达第 ' + run.stage + ' 关', '⚔️ 击杀 ' + run.kills);
+  if (run.poison) stats.push('☠️ 毒词攻克 ' + Object.keys(run.poisonCleared || {}).length + '/' + run.poison.words.length);
+  else if (run.mode === 'adventure') stats.push('🏆 抵达第 ' + run.stage + ' 关', '⚔️ 击杀 ' + run.kills);
   if (run.mode === 'endless') stats.push('⚔️ 击杀 ' + run.kills + ' 只');
+  if (run.mode === 'expedition') stats.push('🚀 远征积分 ' + (run.expScore || 0), '⚔️ 击杀 ' + run.kills + ' / 19',
+    '📈 今日最高 ' + ((save.expedition && save.expedition.date === expDayStamp()) ? save.expedition.best : 0));
   if (run.mode === 'review') stats.push('📖 复习 ' + run.kills + ' 词');
   if (run.mode === 'drill') stats.push('🔥 强化 ' + run.kills + ' 词');
   if (run.mode === 'plan') stats.push('🎯 计划完成 ' + run.kills + ' 词');
@@ -2057,11 +3284,83 @@ function endRun(reason) {
     return '<div class="rw-row"><span class="rw-mark">' + mark + '</span><span class="rw-word">' + r.w + '</span><span class="rw-mean">' + r.m + '</span><span class="rw-stars">' + stars + '</span></div>';
   });
   $('result-words').innerHTML = rows.length ? rows.join('') : '<p class="hint">本局没有遇到新单词</p>';
-  $('btn-retry-wrong').hidden = wrongs.length < 2;
+
+  /* 噩梦关卡结算：记录「我闯的毒」战绩，并备好成绩码 */
+  if (run.poison) {
+    logPoison({
+      role: 'play',
+      words: run.poison.words.slice(),
+      cleared: Object.keys(run.poisonCleared || {}).length,
+      total: run.poison.words.length,
+      win: reason === 'done'
+    });
+  }
+  $('btn-result-code').hidden = !run.poison;
+  $('btn-retry-wrong').hidden = wrongs.length < 2 || !!run.poison;
+  /* 一键投毒顺手化：有复仇词或混淆对可投时，投毒按钮脉动提示 */
+  var canPoison = run.records.some(function (r) { return r.wrong >= 2 && ENC_INDEX[r.w] !== undefined; }) ||
+    topConfusePairs(2).length > 0;
+  $('btn-poison-export').classList.toggle('charged', canPoison);
 
   run.ended = reason;
   showScreen('scr-result');
   refreshHome();
+  drawResultViz();   /* 战绩可视化：本局答题节奏图（屏幕可见后绘制才有宽度） */
+}
+
+/* 结算页战绩可视化：一题一柱，绿柱高度=当时连击，红点=失误，星标=最高连击点 */
+function drawResultViz() {
+  var cv = $('result-canvas');
+  if (!cv) return;
+  var tl = run.timeline || [];
+  if (!tl.length) { cv.hidden = true; return; }
+  cv.hidden = false;
+  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  var W = cv.clientWidth || 460, H = 96;
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  var c = cv.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.clearRect(0, 0, W, H);
+  var pad = 10, top = 22, base = H - 18;
+  var n = tl.length;
+  var slot = (W - pad * 2) / n;
+  var bw = Math.max(3, Math.min(22, slot - 2));
+  /* 基线 */
+  c.strokeStyle = 'rgba(255,255,255,.2)';
+  c.lineWidth = 1;
+  c.beginPath(); c.moveTo(pad, base + .5); c.lineTo(W - pad, base + .5); c.stroke();
+  var maxCombo = 0, maxAt = -1;
+  for (var i = 0; i < n; i++) {
+    if (tl[i].ok && tl[i].combo > maxCombo) { maxCombo = tl[i].combo; maxAt = i; }
+  }
+  for (i = 0; i < n; i++) {
+    var x = pad + i * slot + (slot - bw) / 2;
+    var t = tl[i];
+    if (t.ok) {
+      var h = Math.min(base - top, 8 + (t.combo - 1) * 5);
+      var g = c.createLinearGradient(0, base - h, 0, base);
+      g.addColorStop(0, '#3ddc84');
+      g.addColorStop(1, 'rgba(61,220,132,.25)');
+      c.fillStyle = g;
+      c.fillRect(x, base - h, bw, h);
+      if (i === maxAt && maxCombo >= 3) {
+        c.fillStyle = '#ffd166';
+        c.font = 'bold 10px sans-serif';
+        c.textAlign = 'center';
+        c.fillText('★' + maxCombo, x + bw / 2, base - h - 4);
+      }
+    } else {
+      c.fillStyle = '#ff5d73';
+      c.beginPath();
+      c.arc(x + bw / 2, base + 6, 3.2, 0, Math.PI * 2);
+      c.fill();
+    }
+  }
+  c.fillStyle = 'rgba(255,255,255,.55)';
+  c.font = '10px sans-serif';
+  c.textAlign = 'left';
+  c.fillText('本局节奏 · 绿柱=答对（高度=当时连击）· 红点=失误', pad, 12);
 }
 
 function retryWrong() {
@@ -2086,11 +3385,26 @@ function updateHUD() {
   } else {
     combo.classList.remove('show');
   }
+  /* 连击全屏节奏反馈：火光从屏幕边缘随连击升温、加快 */
+  var heat = run.combo >= 10 ? 3 : (run.combo >= 6 ? 2 : (run.combo >= 3 ? 1 : 0));
+  var scrB = $('scr-battle');
+  scrB.classList.toggle('combo-heat-1', heat === 1);
+  scrB.classList.toggle('combo-heat-2', heat === 2);
+  scrB.classList.toggle('combo-heat-3', heat === 3);
 
   if (run.mode === 'adventure') {
-    $('battle-stage').textContent = (run.bossStage ? '⚠️ ' : '') + '第 ' + run.stage + ' 关';
+    if (run.poison) {
+      $('battle-stage').textContent = '☠️ 毒池 ' + run.kills + '/' + run.stageSize;
+    } else {
+      $('battle-stage').textContent = (run.bossStage ? '⚠️ ' : '') + '第 ' + run.stage + ' 关';
+    }
     var remain = run.stageSize - run.killedInStage;
     $('monster-queue').textContent = run.bossStage ? '' : '👹 ×' + remain;
+  } else if (run.mode === 'expedition') {
+    $('battle-stage').textContent = '🚀 第 ' + run.stage + '/' + EXP_STAGES.length + ' 关' +
+      (run.bossStage ? ' ⚠️' : (run.bossMod ? ' ⚠️精英' : ''));
+    var remainExp = run.stageSize - run.killedInStage;
+    $('monster-queue').textContent = run.bossStage ? '' : '👹 ×' + remainExp;
   } else if (run.mode === 'endless') {
     $('battle-stage').textContent = '击杀 ' + run.kills;
     $('monster-queue').textContent = '';
@@ -2109,7 +3423,7 @@ function updateHUD() {
     $('monster-hp-fill').style.width = (run.monster.hp / run.monster.maxHp * 100) + '%';
   }
   /* 大军压境条（守城模式） */
-  var combat = (run.mode === 'adventure' || run.mode === 'endless');
+  var combat = (run.mode === 'adventure' || run.mode === 'endless' || run.mode === 'expedition');
   $('pressure-wrap').style.display = combat ? '' : 'none';
   var heroBar = $('hero-hp-fill').parentElement;
   heroBar.style.display = 'none';   /* 守城模式不再用血条 */
@@ -2120,6 +3434,7 @@ function updateHUD() {
     $('pressure-label').textContent = '城防 ' + Math.max(0, 100 - p) + '%';
     $('pressure-bar').classList.toggle('critical', p >= 70);
     $('hero-hp-text').textContent = '🏰 城防 ' + Math.max(0, 100 - p) + '%';
+    updateCastleViz();   /* 城堡裂纹分档 + 火光烟雾随压境值变化 */
   }
   var buffs = [];
   if (run.shields) buffs.push('🛡️×' + run.shields);
@@ -2271,6 +3586,16 @@ function refreshHome() {
   $('home-coins').textContent = save.coins;
   $('home-mastered').textContent = masteredCount();
   $('home-today').textContent = save.streak.todayCount;
+  $('home-level').textContent = save.level;
+  $('btn-talent').textContent = '✨ 天赋' + (save.talentPts > 0 ? ' +' + save.talentPts : '');
+  /* 每日远征入口：当日已通关/历史最高分直接写在按钮上 */
+  var expSub = $('exp-sub');
+  if (expSub) {
+    var sameDay = save.expedition && save.expedition.date === expDayStamp();
+    expSub.textContent = expTodayCleared() ? ('今日已告捷 · 最高 ' + (sameDay ? save.expedition.best : 0) + ' 分')
+      : (sameDay && save.expedition.best > 0 ? '今日最高 ' + save.expedition.best + ' 分 · 再冲一波'
+      : '每日固定关卡 · 全员同题');
+  }
   renderDaily();
   renderPlan();
   persist();
@@ -2279,15 +3604,16 @@ function refreshHome() {
 /* ========================= 出战设置 ========================= */
 function openSetup(mode) {
   setupMode = mode;
-  var titles = { adventure: '🧭 出战准备', endless: '♾️ 无尽挑战', review: '📖 复习设置' };
-  $('setup-title').textContent = titles[mode];
+  var titles = { adventure: '🧭 出战准备', endless: '♾️ 无尽挑战', review: '📖 复习设置', expedition: '🚀 每日远征' };
+  $('setup-title').textContent = titles[mode] || titles.adventure;
   $('setup-diff-wrap').style.display = (mode === 'review') ? 'none' : '';
   renderSetupLists();
 
   var radios = document.querySelectorAll('input[name=diff]');
   radios.forEach(function (r) { r.checked = (r.value === save.lastDiff); });
   $('setup-size').value = String(save.sessionSize || 10);
-  $('size-note').textContent = mode === 'review' ? '本次复习的单词数量' : '每关出战的单词数量';
+  $('size-note').textContent = mode === 'review' ? '本次复习的单词数量'
+    : (mode === 'expedition' ? '远征词量由今日种子决定（20 词）' : '每关出战的单词数量');
 
   showScreen('scr-setup');
 }
@@ -2625,6 +3951,7 @@ function bindSettings() {
     try { document.execCommand('copy'); toast('已复制，粘贴到别处保存即可'); } catch (e) { toast('请手动全选复制'); }
   };
   $('io-ok').onclick = function () {
+    if (ioMode === 'poison') { handlePoisonPaste($('io-text').value); return; }
     if (ioMode !== 'import') { $('io-overlay').hidden = true; return; }
     try {
       var data = JSON.parse($('io-text').value);
@@ -2637,18 +3964,346 @@ function bindSettings() {
 
 /* ========================= 存档导出 / 导入 ========================= */
 var ioMode = 'export';
-function openIO(mode) {
+function openIO(mode, payload) {
   ioMode = mode;
-  $('io-title').textContent = mode === 'export' ? '📤 导出存档（复制下面这段文本保管）' : '📥 导入存档（粘贴之前导出的文本）';
+  var titles = {
+    'export': '📤 导出存档（复制下面这段文本保管）',
+    'import': '📥 导入存档（粘贴之前导出的文本）',
+    'poison': '☠️ 粘贴挑战码（接受好友的投毒）',
+    'poison-export': '⚔️ 挑战码已生成（复制发给好友，区分大小写）',
+    'result-export': '📨 成绩码（复制回贴给出题者）'
+  };
+  $('io-title').textContent = titles[mode] || titles['export'];
+  $('io-ok').textContent = mode === 'poison' ? '⚔️ 应战！' : (mode === 'import' ? '确定' : '关闭');
   var ta = $('io-text');
-  ta.value = mode === 'export' ? JSON.stringify(save) : '';
-  ta.readOnly = mode === 'export';
+  ta.value = mode === 'export' ? JSON.stringify(save) : (payload !== undefined ? payload : '');
+  ta.placeholder = mode === 'poison' ? '在此粘贴好友发来的挑战码…' : '';
+  ta.readOnly = (mode === 'export' || mode === 'poison-export' || mode === 'result-export');
+  var logEl = $('io-poison-log');
+  if (mode === 'poison') { renderPoisonLog(logEl); logEl.hidden = false; }
+  else logEl.hidden = true;
   $('io-overlay').hidden = false;
-  if (mode === 'export') setTimeout(function () { ta.focus(); ta.select(); }, 60);
+  if (mode === 'export' || mode === 'poison-export' || mode === 'result-export') {
+    setTimeout(function () { ta.focus(); ta.select(); }, 60);
+  }
+}
+
+/* ========================= 投毒挑战码（纯本地，零服务器） =========================
+   挑战码 12-18 位，字符集 0-9 a-z A-Z _ -（区分大小写），双方词库一致即互通：
+     [0]  'W' 挑战码 / 'R' 成绩码
+     [1]  挑战码 v1（词缀 0-4）：BOSS 词缀*12 + 复仇词数N*3 + 词对数M（N+2M ≤ 5）
+          挑战码 v2（词缀 5+，旧版无法解）：[1]=60+词缀高位(0-3)，[2]=词缀*12+N*3+M
+          成绩码：胜负*32 + 毒词总数T
+     [2]  成绩码专用：攻克位掩码（bit i = 第 i 个毒词被击败）；挑战码 v2 为扩展词缀位
+     ...  毒词（词典去重序列索引，每词 2 字符）→ 每词掌握度 lv0-5（每 2 词 1 字符）
+          → 随机填充位（凑满 12 位）→ 校验位（加权和 mod 64）
+   应战规则：怪物血量 = 5 - 出题者对该词的掌握度（限 1-4，lv 越低怪越硬）
+   ================================================================================ */
+var POISON_CHARS = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_-';
+var POISON_MIN_LEN = 12;
+
+/* 词库指纹：内置词按出现顺序去重（与 words.js 一一对应） */
+var ENC_WORDS = (function () {
+  var seen = {}, arr = [];
+  ALL_WORDS.forEach(function (it) { if (!seen[it.w]) { seen[it.w] = 1; arr.push(it.w); } });
+  return arr;
+})();
+var ENC_INDEX = {};
+ENC_WORDS.forEach(function (w, i) { ENC_INDEX[w] = i; });
+
+function pEncode2(n) { return POISON_CHARS.charAt(Math.floor(n / 64)) + POISON_CHARS.charAt(n % 64); }
+function pDecode2(s, i) {
+  var a = POISON_CHARS.indexOf(s.charAt(i)), b = POISON_CHARS.indexOf(s.charAt(i + 1));
+  if (a < 0 || b < 0) return -1;
+  return a * 64 + b;
+}
+function pChecksum(s) {
+  var h = 0;
+  for (var i = 0; i < s.length; i++) h = (h + s.charCodeAt(i) * (i + 7)) % 64;
+  return POISON_CHARS.charAt(h);
+}
+function pFinish(body) {   /* 随机填充到最短 12 位，再追加校验位 */
+  while (body.length < POISON_MIN_LEN - 1) body += POISON_CHARS.charAt(Math.floor(Math.random() * 64));
+  return body + pChecksum(body);
+}
+function pValidate(c) {
+  var m = c && c.charAt ? c.charAt(0).toUpperCase() : '';
+  if (m !== 'W' && m !== 'R') return false;
+  if (!c || c.length < POISON_MIN_LEN || c.length > 18) return false;
+  for (var i = 0; i < c.length; i++) if (POISON_CHARS.indexOf(c.charAt(i)) < 0) return false;
+  return pChecksum(c.slice(0, -1)) === c.charAt(c.length - 1);
+}
+function lvOf(w) {
+  var m = save.mastery[w];
+  return Math.max(0, Math.min(5, (m && m.lv) || 0));
+}
+
+/* 易混淆词对 Top-N（与图鉴 renderConfuse 同源逻辑），仅保留词典内词 */
+function topConfusePairs(max) {
+  var seenPair = {}, rows = [];
+  for (var w in (save.confuse || {})) {
+    var others = save.confuse[w];
+    for (var o in others) {
+      var key = [w, o].sort().join('|');
+      if (seenPair[key]) { seenPair[key].n = Math.max(seenPair[key].n, others[o]); continue; }
+      seenPair[key] = { a: w, b: o, n: others[o] };
+    }
+  }
+  Object.keys(seenPair).forEach(function (k) { rows.push(seenPair[k]); });
+  rows.sort(function (x, y) { return y.n - x.n; });
+  return rows.filter(function (p) {
+    return p.a !== p.b && ENC_INDEX[p.a] !== undefined && ENC_INDEX[p.b] !== undefined;
+  }).slice(0, max);
+}
+
+/* 结算页「投毒」：把本场复仇怪物 + 混淆词对 + 1 条随机 BOSS 词缀编码成挑战码 */
+function buildPoisonCode() {
+  if (!run || !run.records) return null;
+  var revs = run.records.filter(function (r) {
+    return r.wrong >= 2 && ENC_INDEX[r.w] !== undefined;   /* 二次答错入队的复仇词 */
+  }).sort(function (a, b) { return b.wrong - a.wrong; }).map(function (r) { return r.w; });
+  var pairs = topConfusePairs(2).filter(function (p) {
+    return revs.slice(0, 3).indexOf(p.a) < 0 || revs.slice(0, 3).indexOf(p.b) < 0;   /* 两词都已是复仇词的词对不再重复编码 */
+  });
+  var nR = Math.min(revs.length, 3);
+  var nP = Math.min(pairs.length, Math.floor((5 - nR) / 2));
+  if (!nR && !nP) return null;
+  var words = revs.slice(0, nR);
+  pairs.slice(0, nP).forEach(function (p) { words.push(p.a, p.b); });
+  var T = words.length;
+  var bossKeys = Object.keys(BOSS_MODS);
+  var bossIdx = Math.floor(Math.random() * bossKeys.length);
+  var mix = nR * 3 + nP;
+  var body = 'W';
+  if (bossIdx <= 4) {
+    body += POISON_CHARS.charAt(bossIdx * 12 + mix);            /* v1：单字符装下词缀 0-4 */
+  } else {
+    var v = bossIdx * 12 + mix;                                  /* 14 条词缀 ≤ 13*12+11 = 167 < 256，v2 容量充足 */
+    body += POISON_CHARS.charAt(60 + (v >> 6)) + POISON_CHARS.charAt(v & 63);   /* v2 转义 */
+  }
+  words.forEach(function (w) { body += pEncode2(ENC_INDEX[w]); });
+  for (var i = 0; i < T; i += 2) {
+    body += POISON_CHARS.charAt(lvOf(words[i]) * 6 + (i + 1 < T ? lvOf(words[i + 1]) : 0));
+  }
+  var seenW = {}, uniq = [];
+  words.forEach(function (w) { if (!seenW[w]) { seenW[w] = 1; uniq.push(w); } });
+  save.poisonIssued = { words: uniq, boss: bossKeys[bossIdx], t: Date.now() };
+  persist();
+  return pFinish(body);
+}
+
+function decodePoisonCode(c) {
+  if (!pValidate(c) || c.charAt(0).toUpperCase() !== 'W') return null;
+  var b1 = POISON_CHARS.indexOf(c.charAt(1));
+  if (b1 < 0) return null;
+  var bossIdx, mix, pos;
+  if (b1 < 60) {
+    bossIdx = Math.floor(b1 / 12); mix = b1 % 12; pos = 2;       /* v1：词缀 0-4 */
+  } else {
+    var b2 = POISON_CHARS.indexOf(c.charAt(2));
+    if (b2 < 0) return null;
+    var packedV = (b1 - 60) * 64 + b2;                           /* v2 转义：词缀 5+ */
+    bossIdx = Math.floor(packedV / 12); mix = packedV % 12; pos = 3;
+  }
+  var nR = Math.floor(mix / 3), nP = mix % 3;
+  if (nR > 3 || nP > 2 || nR + 2 * nP > 5) return null;
+  var T = nR + 2 * nP;
+  if (c.length < pos + 2 * T + Math.ceil(T / 2) + 1) return null;
+  var words = [], i, idx;
+  for (i = 0; i < T; i++) {
+    idx = pDecode2(c, pos); pos += 2;
+    if (idx < 0 || idx >= ENC_WORDS.length) return null;
+    words.push(ENC_WORDS[idx]);
+  }
+  var lvs = [];
+  for (i = 0; i < T; i += 2) {
+    var v = POISON_CHARS.indexOf(c.charAt(pos)); pos++;
+    if (v < 0) return null;
+    lvs.push(Math.floor(v / 6));
+    if (i + 1 < T) lvs.push(v % 6);
+  }
+  var bossKeys = Object.keys(BOSS_MODS);
+  if (!bossKeys[bossIdx]) return null;
+  var revs = words.slice(0, nR).map(function (w, k) { return { w: w, lv: lvs[k] }; });
+  var pairs = [];
+  for (i = 0; i < nP; i++) {
+    pairs.push([
+      { w: words[nR + i * 2], lv: lvs[nR + i * 2] },
+      { w: words[nR + i * 2 + 1], lv: lvs[nR + i * 2 + 1] }
+    ]);
+  }
+  var items = words.map(function (w, k) { return { w: w, lv: lvs[k] }; });
+  return { boss: bossKeys[bossIdx], revs: revs, pairs: pairs, items: items, words: words, lvs: lvs };
+}
+
+/* 噩梦关卡：用挑战码里的毒词作为显式词池注入 startRun（同 startDrill/startDuel 通道） */
+function startNightmare(pd) {
+  var pool = [];
+  (pd.items || []).forEach(function (item) {
+    var m = meaningOfAny(item.w);
+    if (m && !pool.some(function (x) { return x.w === item.w; })) pool.push({ w: item.w, m: m });
+  });
+  if (!pool.length) { toast('挑战码里的毒词不在当前词库中'); return; }
+  var lvMap = {};
+  (pd.items || []).forEach(function (item) { lvMap[item.w] = item.lv; });
+  var confuseMap = {};
+  (pd.pairs || []).forEach(function (p) {
+    (confuseMap[p[0].w] = confuseMap[p[0].w] || []).push(p[1].w);
+    (confuseMap[p[1].w] = confuseMap[p[1].w] || []).push(p[0].w);
+  });
+  var ids = (save.lastLists || []).filter(function (id) { return !!listById(id); });
+  if (!ids.length) ids = ['cet4'];
+  startRun('adventure', ids, 'normal', pool);
+  run.poison = { data: pd, words: pool.map(function (x) { return x.w; }), lvMap: lvMap, confuseMap: confuseMap };
+  run.poisonAffix = pd.boss;
+  markModSeen(pd.boss);   /* 词缀图鉴：应战也算遭遇过这条词缀 */
+  run.poisonCleared = {};
+  run.stageSize = pool.length;   /* 单一毒池一战定胜负 */
+  run.unitCtx = null;
+  run.unitSet = null;
+  applyTheme(4);
+  updateHUD();
+  var mod = BOSS_MODS[pd.boss];
+  showBanner('☠️ 噩梦毒池', '出题者的毒词 ×' + pool.length + ' · 血量随其掌握度反转' +
+    (mod ? '<br>⚠️ 词缀 ' + mod.icon + ' ' + mod.name + '：' + mod.desc : ''),
+    function () { nextMonster(); }, 2500);
+}
+
+/* 成绩码：谁攻克了哪些毒词 */
+function buildResultCode() {
+  if (!run || !run.poison || !run.poison.words.length) return null;
+  var words = run.poison.words;
+  var cleared = run.poisonCleared || {};
+  var mask = 0;
+  words.forEach(function (w, i) { if (cleared[w]) mask |= (1 << i); });
+  var win = run.ended === 'done' ? 1 : 0;
+  var T = words.length;
+  var body = 'R' + POISON_CHARS.charAt(win * 32 + T) + POISON_CHARS.charAt(mask);
+  words.forEach(function (w) { body += pEncode2(ENC_INDEX[w]); });
+  return pFinish(body);
+}
+
+function decodeResultCode(c) {
+  if (!pValidate(c) || c.charAt(0).toUpperCase() !== 'R') return null;
+  var f = POISON_CHARS.indexOf(c.charAt(1));
+  var win = f >= 32 ? 1 : 0, T = f % 32;
+  var mask = POISON_CHARS.indexOf(c.charAt(2));
+  if (T < 1 || T > 5 || mask < 0 || f < 0) return null;
+  if (c.length < 3 + 2 * T + 1) return null;
+  var words = [], cleared = [];
+  for (var i = 0; i < T; i++) {
+    var idx = pDecode2(c, 3 + i * 2);
+    if (idx < 0 || idx >= ENC_WORDS.length) return null;
+    var w = ENC_WORDS[idx];
+    words.push(w);
+    if (mask & (1 << i)) cleared.push(w);
+  }
+  return { win: !!win, words: words, cleared: cleared, total: T };
+}
+
+/* 战绩：谁毒倒了谁（本地存档，向后兼容旧 wq_save_v1） */
+function logPoison(entry) {
+  entry.t = Date.now();
+  save.poisonLog = save.poisonLog || [];
+  save.poisonLog.unshift(entry);
+  if (save.poisonLog.length > 20) save.poisonLog.length = 20;
+  persist();
+  checkAch();
+}
+function poisonAgo(t) {
+  var d = Date.now() - t;
+  if (d < 60e3) return '刚刚';
+  if (d < 3600e3) return Math.floor(d / 60e3) + ' 分钟前';
+  if (d < 86400e3) return Math.floor(d / 3600e3) + ' 小时前';
+  return Math.floor(d / 86400e3) + ' 天前';
+}
+function renderPoisonLog(el) {
+  var log = save.poisonLog || [];
+  if (!log.length) {
+    el.innerHTML = '<p class="hint">还没有投毒战绩——结算页「⚔️ 投毒」发出挑战，或在上面粘贴好友的挑战码，这里记录谁毒倒了谁</p>';
+    return;
+  }
+  var html = '<div class="io-log-title">🏆 投毒战绩</div>';
+  log.slice(0, 5).forEach(function (e) {
+    var role = e.role === 'set' ? '☠️ 我布的毒' : '🗡️ 我闯的毒';
+    var outcome = e.role === 'set'
+      ? (e.win ? '对方通关 · 毒计被破解' : '对方未通关 · 毒计成功')
+      : (e.win ? '通关成功' : '未能通关');
+    html += '<div class="io-log-row"><span class="io-log-role">' + role + '</span>' +
+      '<span class="io-log-out">攻克 ' + e.cleared + '/' + e.total + ' · ' + outcome + '</span>' +
+      '<span class="io-log-time">' + poisonAgo(e.t) + '</span></div>';
+  });
+  el.innerHTML = html;
+}
+
+/* 粘贴入口统一分发：W 开头 = 挑战码（应战），R 开头 = 成绩码（战报） */
+function handlePoisonPaste(raw) {
+  var c = (raw || '').trim();
+  if (!c) { toast('请先粘贴挑战码'); return; }
+  if (c.charAt(0).toUpperCase() === 'R') {
+    var rep = decodeResultCode(c);
+    if (!rep) { toast('成绩码无效，请检查是否完整复制'); return; }
+    receiveResultReport(rep);
+    $('io-overlay').hidden = true;
+    return;
+  }
+  var pd = decodePoisonCode(c);
+  if (!pd) { toast('挑战码无效，请检查是否完整复制（区分大小写）'); return; }
+  $('io-overlay').hidden = true;
+  startNightmare(pd);
+}
+function receiveResultReport(rep) {
+  var issued = save.poisonIssued;
+  var pSet = function (arr) { return arr.slice().sort().join('|'); };
+  var mine = !!(issued && issued.words && issued.words.length === rep.words.length &&
+    pSet(issued.words) === pSet(rep.words));
+  logPoison({
+    role: 'set',
+    words: rep.words.slice(),
+    cleared: rep.cleared.length,
+    total: rep.total,
+    win: rep.win,
+    mine: mine
+  });
+  var head = mine ? '☠️ 你的毒计战报' : '📨 收到一份战报';
+  var body = rep.win
+    ? (mine ? '对方攻克了全部 ' + rep.total + ' 个毒词，毒计被破解！' : '对方通关，攻克 ' + rep.cleared.length + '/' + rep.total)
+    : (mine ? '对方倒在你的毒池里，仅攻克 ' + rep.cleared.length + '/' + rep.total + '，毒计成功！' : '对方攻克 ' + rep.cleared.length + '/' + rep.total + '，未能通关');
+  toast(head + '：' + body);
+  if (!rep.win) Confetti.burst(80);
+}
+
+function doPoisonExport() {
+  if (!run || !run.records) { toast('结算数据已失效'); return; }
+  var code = buildPoisonCode();
+  if (!code) { toast('本局没有可投毒的内容——需要答错 2 次的复仇词或混淆词对'); return; }
+  /* 一键投毒：环境允许时直接进剪贴板，省一步「复制」 */
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code).then(function () {
+        toast('⚔️ 挑战码已自动复制，直接粘贴发给好友！');
+      }, function () {});
+    }
+  } catch (e) {}
+  openIO('poison-export', code);
+}
+function doResultExport() {
+  var code = buildResultCode();
+  if (!code) { toast('成绩码生成失败'); return; }
+  openIO('result-export', code);
 }
 
 /* ========================= 键盘操作 ========================= */
 function onKey(e) {
+  /* 词根实验室：1-4 选项作答（与战斗页键位习惯一致） */
+  if ($('scr-lab') && $('scr-lab').classList.contains('active') && lab && lab.q && !lab.locked) {
+    var ln = parseInt(e.key, 10);
+    if (ln >= 1 && ln <= 4) {
+      var lb = $('lab-opts').children[ln - 1];
+      if (lb) { e.preventDefault(); labAnswer(ln - 1); }
+    }
+    return;
+  }
   if (!run || run.ended) return;
   if (!$('memcard').hidden || !$('banner').hidden) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeMemCard(); }
@@ -2697,18 +4352,43 @@ function bindEvents() {
   $('btn-adventure').onclick = function () { openSetup('adventure'); };
   $('btn-endless').onclick = function () { openSetup('endless'); };
   $('btn-review').onclick = function () { openSetup('review'); };
+  $('btn-expedition').onclick = function () { openSetup('expedition'); };
   $('btn-codex').onclick = openCodex;
   $('btn-settings').onclick = openSettings;
   $('btn-help').onclick = function () { showScreen('scr-help'); };
   $('btn-ach').onclick = openAch;
   $('btn-ach-back').onclick = function () { showScreen('scr-home'); };
+  $('btn-talent').onclick = openTalent;
+  $('btn-talent-back').onclick = function () { showScreen('scr-home'); refreshHome(); };
+  $('talent-grid').addEventListener('click', function (e) {
+    var b = e.target.closest('.talent-buy');
+    if (b) buyTalent(b.dataset.t);
+  });
+  $('btn-packs').onclick = openPacks;
+  $('btn-packs-back').onclick = function () { showScreen('scr-home'); };
+  $('pack-list').addEventListener('click', function (e) {
+    var b = e.target.closest('.pack-start');
+    if (b) startPackRun(b.dataset.p);
+  });
   $('btn-plan').onclick = startPlan;
+  $('btn-poison').onclick = function () { openIO('poison'); };
   $('btn-wrongbook').onclick = openWrongBook;
   $('btn-wrong-back').onclick = function () { showScreen('scr-home'); refreshHome(); };
   $('btn-drill').onclick = startDrill;
   $('btn-match').onclick = openMatch;
   $('btn-match-restart').onclick = startMatch;
   $('btn-match-back').onclick = function () { stopMatchTimer(); showScreen('scr-home'); refreshHome(); };
+  bindMatchDrag();   /* 记忆配对：拖拽撞击配对（点击翻牌仍可用） */
+  // 词根合成实验室
+  $('btn-lab').onclick = openLab;
+  $('btn-lab-start').onclick = startLab;
+  $('btn-lab-again').onclick = startLab;
+  $('btn-lab-back').onclick = function () { showScreen('scr-home'); refreshHome(); };
+  $('btn-lab-next').onclick = labNextOrFinish;
+  $('lab-opts').addEventListener('click', function (e) {
+    var b = e.target.closest('.q-opt');
+    if (b) labAnswer(parseInt(b.dataset.i || b.getAttribute('data-i'), 10));
+  });
   $('daily-tasks').addEventListener('click', function (e) {
     var b = e.target.closest('.btn-claim');
     if (b) claimDaily(parseInt(b.dataset.i, 10));
@@ -2744,6 +4424,13 @@ function bindEvents() {
   $('btn-spell-back').onclick = spellBack;
   $('btn-spell-submit').onclick = submitSpell;
   $('btn-spell-hint').onclick = spellHint;
+  // 蓄力一击：点怪物或点 ⚡ 按钮都行
+  $('btn-charge').onclick = function () { this.blur(); tryStartCharge(); };
+  $('monster-figure').addEventListener('pointerdown', function (e) {
+    if (!canCharge()) return;
+    e.preventDefault();
+    tryStartCharge();
+  });
 
   // 记忆卡片
   $('mem-ok').onclick = closeMemCard;
@@ -2794,9 +4481,13 @@ function bindEvents() {
     if (run.mode === 'review') openSetup('review');
     else if (run.mode === 'plan') { showScreen('scr-home'); refreshHome(); }
     else if (run.mode === 'drill') { openWrongBook(); }
+    else if (run.poison) startNightmare(run.poison.data);
+    else if (run.packId) startPackRun(run.packId);
     else startRun(run.mode, run.listIds, run.diffKey);
   };
   $('btn-retry-wrong').onclick = retryWrong;
+  $('btn-poison-export').onclick = doPoisonExport;
+  $('btn-result-code').onclick = doResultExport;
   $('btn-result-home').onclick = function () { showScreen('scr-home'); refreshHome(); };
 
   // 图鉴
@@ -2846,6 +4537,7 @@ function bindEvents() {
 
   // 设置 / 帮助
   bindSettings();
+  $('btn-poison-set').onclick = function () { openIO('poison'); };
   $('btn-settings-back').onclick = function () { showScreen('scr-home'); };
   $('btn-help-back').onclick = function () { showScreen('scr-home'); };
 
@@ -2853,6 +4545,29 @@ function bindEvents() {
   document.addEventListener('keydown', onKey);
   // 首次交互激活音频
   document.addEventListener('pointerdown', function () { Sfx.ensure(); }, { once: true });
+  bindMobileKeyboard();
+}
+
+/* ========================= 移动端竖屏：键盘弹出不遮挡输入/作答区 =========================
+   仅窄屏（≤480px）启用，桌面零改动。键盘弹出（visualViewport 缩小）或输入框聚焦时，
+   把聚焦的输入/作答元素滚进可视区：挑战码粘贴框、图鉴搜索、自定义词库编辑。 */
+function bindMobileKeyboard() {
+  if (!window.visualViewport) return;
+  var mq = window.matchMedia('(max-width: 480px)');
+  var timer = null;
+  function reveal() {
+    if (mq && !mq.matches) return;
+    var ae = document.activeElement;
+    if (ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT') && ae.type !== 'checkbox' && ae.type !== 'radio') {
+      try { ae.scrollIntoView({ block: 'center' }); } catch (e) { ae.scrollIntoView(); }
+    }
+  }
+  window.visualViewport.addEventListener('resize', function () {
+    clearTimeout(timer); timer = setTimeout(reveal, 120);
+  });
+  document.addEventListener('focusin', function () {
+    clearTimeout(timer); timer = setTimeout(reveal, 350);
+  });
 }
 
 function init() {
@@ -2861,10 +4576,13 @@ function init() {
   bindEvents();
   refreshHome();
   showScreen('scr-home');
-  /* PWA：本地服务 / https 下注册离线缓存（双击 file:// 打开时自动跳过） */
+  /* PWA：本地服务 / https 下注册离线缓存（双击 file:// 打开时自动跳过）。
+     updateViaCache:'none'：SW 脚本的更新检查绕过 HTTP 缓存——否则 sw.js 自身被
+     启发式新鲜缓存时（本地 python 服务器只发 Last-Modified 不发 Cache-Control），
+     浏览器会连续多次加载都用旧 SW 字节，版本更新迟迟不生效 */
   if ('serviceWorker' in navigator &&
       (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-    try { navigator.serviceWorker.register('./sw.js').catch(function () {}); } catch (e) {}
+    try { navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(function () {}); } catch (e) {}
   }
 }
 
