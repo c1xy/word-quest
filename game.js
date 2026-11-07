@@ -54,7 +54,7 @@ function defaultSave() {
     unitList: 'cet4',
     wrongBook: {},       // word -> { n: 答错次数, t: 最近答错时间 }
     sessionSize: 10,     // 本局词量（每关怪物数 / 复习总题数）
-    poisonLog: [],       // 投毒战绩（谁毒倒了谁）：{ role:'set'|'play', words, cleared, total, win, t }
+    poisonLog: [],       // 投毒战绩（谁毒倒了谁）：{ role:'set'|'play', words, cleared, total, win, pending?, t }
     poisonIssued: null,  // 最近一次发出的挑战码内容，用于核对回贴的成绩码
     rogue: { runs: 0, wins: 0, bestChain: 0, cursesSeen: {} },  // 词魂肉鸽档案（出征/加冕/最高连锁/遭遇过的诅咒）
     duel: { plays: 0, p1wins: 0, p2wins: 0 }                    // 双人对决战绩（红队/蓝队胜负）
@@ -258,6 +258,7 @@ function sanitizeSave(src) {
       cleared: intOr(o.cleared, 0, 0, 1e9),
       total: intOr(o.total, 0, 0, 99),
       win: o.win === true,
+      pending: o.pending === true,   /* 发码即记账的骨架标记：丢了会把「待回贴」误显示成毒计成功 */
       t: intOr(o.t, 0, 0, 8.64e15)
     };
   });
@@ -762,7 +763,8 @@ function checkAch() {
   if (Object.keys(save.pets).length >= 1) unlockAch('pet1');
   if (save.level >= 5) unlockAch('lv5');
   if (talentRankSum() >= 5) unlockAch('talent5');
-  if ((save.poisonLog || []).some(function (e) { return e.role === 'set'; })) unlockAch('poison_set');
+  /* 发过挑战码即算布毒（含修复前只写 poisonIssued 未入战绩日志的旧存档） */
+  if ((save.poisonLog || []).some(function (e) { return e.role === 'set'; }) || save.poisonIssued) unlockAch('poison_set');
   if ((save.poisonLog || []).some(function (e) { return e.role === 'play' && e.win; })) unlockAch('poison_win');
   if ((save.stats.packDone || 0) >= 1) unlockAch('pack1');
   if (Object.keys(save.stats.packDoneMap || {}).length >= 3) unlockAch('packs3');
@@ -4225,6 +4227,9 @@ function openSetup(mode) {
   var radios = document.querySelectorAll('input[name=diff]');
   radios.forEach(function (r) { r.checked = (r.value === save.lastDiff); });
   $('setup-size').value = String(save.sessionSize || 10);
+  /* 远征词池/每关怪量全部由当日种子钉死（planExpedition 20 词 + EXP_STAGES），
+     本局词量对远征无效——下拉禁用防误改（改了只会漏到以后的冒险/复习局） */
+  $('setup-size').disabled = (mode === 'expedition');
   $('size-note').textContent = mode === 'review' ? '本次复习的单词数量'
     : (mode === 'expedition' ? '远征词量由今日种子决定（20 词）' : '每关出战的单词数量');
 
@@ -4726,6 +4731,7 @@ function buildPoisonCode() {
   var seenW = {}, uniq = [];
   words.forEach(function (w) { if (!seenW[w]) { seenW[w] = 1; uniq.push(w); } });
   save.poisonIssued = { words: uniq, boss: bossKeys[bossIdx], t: Date.now() };
+  markPoisonSetPending(uniq);   /* 发码即记账：写入待回贴的「我布的毒」骨架，「投毒新手」即时解锁 */
   persist();
   return pFinish(body);
 }
@@ -4843,6 +4849,26 @@ function decodeResultCode(c) {
   return { win: !!win, words: words, cleared: cleared, total: T };
 }
 
+/* 发码即记账：挑战码成功生成就写入一条「我布的毒」骨架条目（待回贴），
+   「投毒新手」成就随之即时解锁；好友回贴战报后由 receiveResultReport 原位更新为真实战绩 */
+function markPoisonSetPending(words) {
+  save.poisonLog = save.poisonLog || [];
+  var wk = words.slice().sort().join('|');
+  var hit = null;
+  for (var i = 0; i < save.poisonLog.length; i++) {
+    var e = save.poisonLog[i];
+    if (e && e.role === 'set' && e.pending && e.words &&
+        e.words.slice().sort().join('|') === wk) { hit = e; break; }   /* 同一组毒词重复发码：只刷新时间，不重复记账 */
+  }
+  if (hit) {
+    hit.t = Date.now();
+  } else {
+    save.poisonLog.unshift({ role: 'set', words: words.slice(), cleared: 0, total: words.length, win: null, pending: true, t: Date.now() });
+    if (save.poisonLog.length > 20) save.poisonLog.length = 20;
+  }
+  checkAch();
+}
+
 /* 战绩：谁毒倒了谁（本地存档，向后兼容旧 wq_save_v1） */
 function logPoison(entry) {
   entry.t = Date.now();
@@ -4871,8 +4897,13 @@ function renderPoisonLog(el) {
     var outcome = e.role === 'set'
       ? (e.win ? '对方通关 · 毒计被破解' : '对方未通关 · 毒计成功')
       : (e.win ? '通关成功' : '未能通关');
+    /* 发码即记账的骨架条目：回贴前没有真实胜负，不冒充「毒计成功」 */
+    if (e.pending) outcome = '等待好友回贴战报';
+    var stat = (e.pending || e.cleared === undefined)
+      ? '毒词 ×' + (e.total || (e.words || []).length || '?')
+      : '攻克 ' + e.cleared + '/' + e.total;
     html += '<div class="io-log-row"><span class="io-log-role">' + role + '</span>' +
-      '<span class="io-log-out">攻克 ' + e.cleared + '/' + e.total + ' · ' + outcome + '</span>' +
+      '<span class="io-log-out">' + stat + ' · ' + outcome + '</span>' +
       '<span class="io-log-time">' + poisonAgo(e.t) + '</span></div>';
   });
   el.innerHTML = html;
@@ -4899,14 +4930,33 @@ function receiveResultReport(rep) {
   var pSet = function (arr) { return arr.slice().sort().join('|'); };
   var mine = !!(issued && issued.words && issued.words.length === rep.words.length &&
     pSet(issued.words) === pSet(rep.words));
-  logPoison({
-    role: 'set',
-    words: rep.words.slice(),
-    cleared: rep.cleared.length,
-    total: rep.total,
-    win: rep.win,
-    mine: mine
-  });
+  /* 发码时已写入的待回贴骨架：战报一到原位更新为真实战绩，不再重复插入 */
+  var hit = null;
+  var log = save.poisonLog || [];
+  for (var i = 0; i < log.length; i++) {
+    var e = log[i];
+    if (e && e.role === 'set' && e.pending && e.words &&
+        e.words.length === rep.words.length && pSet(e.words) === pSet(rep.words)) { hit = e; break; }
+  }
+  if (hit) {
+    hit.cleared = rep.cleared.length;
+    hit.total = rep.total;
+    hit.win = rep.win;
+    hit.mine = true;   /* 骨架条目只有本机发码才会写入——必为自己布的毒 */
+    hit.pending = false;
+    hit.t = Date.now();
+    persist();
+    checkAch();
+  } else {
+    logPoison({
+      role: 'set',
+      words: rep.words.slice(),
+      cleared: rep.cleared.length,
+      total: rep.total,
+      win: rep.win,
+      mine: mine
+    });
+  }
   var head = mine ? '☠️ 你的毒计战报' : '📨 收到一份战报';
   var body = rep.win
     ? (mine ? '对方攻克了全部 ' + rep.total + ' 个毒词，毒计被破解！' : '对方通关，攻克 ' + rep.cleared.length + '/' + rep.total)
