@@ -1,6 +1,6 @@
 /* 单词大冒险 · Service Worker（网络优先，离线回落缓存） */
 'use strict';
-var CACHE = 'wq-cache-v15';
+var CACHE = 'wq-cache-v17';
 
 /* ── 发布更新清单（缺一不可，否则回访用户首次刷新可能新旧混版）──────────
    1) bump 上面的 CACHE 版本号（v15 → v16 …）：旧 SW 缓存整体作废重建；
@@ -13,13 +13,15 @@ self.addEventListener('install', function (e) {
   e.waitUntil(
     caches.open(CACHE).then(function (c) {
       var urls = ['./', './index.html', './style.css', './words.js', './game.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
-      /* 预缓存也强制再验证：install 里发起的 fetch 不经过本 SW 的 fetch 处理器，
+      /* 预缓存逐项容错：单项 404/瞬断只跳过该项（离线回落兜底），不再 all-or-nothing
+         阻断 install —— 否则新 SW 永不 skipWaiting/接管，版本更新静默停摆。
+         预缓存也强制再验证：install 里发起的 fetch 不经过本 SW 的 fetch 处理器，
          若走默认缓存模式，会把 HTTP 缓存里启发式新鲜的旧文件直接存进新版本缓存 */
       return Promise.all(urls.map(function (u) {
         return fetch(new Request(u, { cache: 'no-cache' })).then(function (r) {
-          if (!r || !r.ok) throw new Error('precache ' + u);
+          if (!r || !r.ok) return null;
           return c.put(u, r);
-        });
+        }).catch(function () { return null; });
       }));
     }).then(function () { return self.skipWaiting(); })
   );
@@ -63,7 +65,12 @@ function revalidate(req) {
     return resp;
   }).catch(function () {
     return caches.match(req, { ignoreSearch: true }).then(function (hit) {
-      return hit || caches.match('./index.html');
+      if (hit) return hit;
+      /* 只允许「导航请求」回落 index.html：子资源（game.js/style.css/图片）失败也回
+         HTML 会造成「HTML 当 JS/CSS」——轻则死页重则渲染崩坏。子资源直接返回网络
+         错误，让浏览器走自己的失败处理。 */
+      if (req.mode === 'navigate') return caches.match('./index.html');
+      return new Response('Word Quest: offline and not in cache', { status: 504, statusText: 'Gateway Timeout' });
     });
   });
 }
