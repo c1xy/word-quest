@@ -2599,6 +2599,8 @@ function buildQuestion(word, avoidType) {
     if (/^[a-z]{3,10}$/.test(word.w)) rt2.push('spell');
     if (rt2.length) types = rt2;
   }
+  /* 听写挑战：全场听音拼写（有语音包靠 TTS 听音，无语音包渲染层降级为首字母提示拼写） */
+  if (run.mode === 'dictation' && /^[a-z]+$/.test(word.w)) types = ['spell'];
   if (avoidType && types.length > 1) types = types.filter(function (t) { return t !== avoidType; });
   var type = rnd(types);
 
@@ -2676,10 +2678,10 @@ function startRun(mode, listIds, diffKey, explicitPool, rogueCfg) {
 function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
   if (!buildEnc()) { showLoadFail(); return; }   /* 词库未加载：出不了题，给可恢复提示 */
   var diff = DIFFS[diffKey] || DIFFS.normal;
-  var unitCtx = (rogueCfg || mode === 'review' || mode === 'drill' || mode === 'expedition') ? null : resolveUnitCtx(listIds);
+  var unitCtx = (rogueCfg || mode === 'review' || mode === 'drill' || mode === 'expedition' || mode === 'dictation') ? null : resolveUnitCtx(listIds);
   var pool;
   if (explicitPool) pool = explicitPool.slice();
-  else if (mode === 'review' || mode === 'drill') pool = buildReviewPool(listIds);
+  else if (mode === 'review' || mode === 'drill' || mode === 'dictation') pool = buildReviewPool(listIds);
   else if (mode === 'plan') pool = buildPlanPool(listIds, unitCtx);
   else pool = buildPool(listIds);
   var maxHp = diff.hp + (save.upgrades.hp || 0) * 6;
@@ -2712,8 +2714,8 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
   }
   if (mode === 'plan') {
     run.reviewTotal = pool.length;
-  } else if (mode === 'review' || mode === 'drill') {
-    /* 普通复习/强化按"本局词量"取题；小词池对决每词来两遍 */
+  } else if (mode === 'review' || mode === 'drill' || mode === 'dictation') {
+    /* 普通复习/强化/听写按"本局词量"取题；小词池对决每词来两遍 */
     run.reviewTotal = explicitPool
       ? (pool.length < 4 ? pool.length * 2 : pool.length)
       : Math.min(Math.max(save.sessionSize || 10, pool.length ? 1 : 0), pool.length);
@@ -2756,10 +2758,12 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
   Array.prototype.forEach.call($('castle-fx').querySelectorAll('.castle-smoke,.castle-spark'), function (n) { n.remove(); });
   castleSmokeOn = false;
   $('scr-battle').classList.remove('boss-live', 'combo-heat-1', 'combo-heat-2', 'combo-heat-3');
-  $('hero-emoji').textContent = (mode === 'adventure' || mode === 'endless' || mode === 'expedition') ? '🏰' : '🧙‍♂️';
+  $('hero-emoji').textContent = (mode === 'adventure' || mode === 'endless' || mode === 'expedition') ? '🏰'
+    : (mode === 'dictation' ? '🎧' : '🧙‍♂️');
   $('hero-hp-text').textContent = (mode === 'review') ? '📖 练习模式 · 不扣血'
     : (mode === 'plan' ? '🎯 今日计划 · 不扣血'
-    : (mode === 'drill' ? '🔥 强化训练 · 不扣血' : '🏰 城防 100%'));
+    : (mode === 'drill' ? '🔥 强化训练 · 不扣血'
+    : (mode === 'dictation' ? '🎧 听写挑战 · 不扣血' : '🏰 城防 100%')));
   updateHUD();
   BGM.stop();
   BGM.start('normal');
@@ -2775,6 +2779,9 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
     var dueN = 0, freshN = 0;
     pool.forEach(function (x) { var m = save.mastery[x.w]; if (m && m.seen > 0) dueN++; else freshN++; });
     showBanner('🎯 今日学习计划', '复习 ' + dueN + ' 个到期词 · 新词 ' + freshN + ' 个 · 不扣血', function () { nextMonster(); }, 1700);
+  } else if (mode === 'dictation') {
+    applyTheme(0);
+    showBanner('🎧 听写挑战', '共 ' + run.reviewTotal + ' 词 · ' + (TTS.ok ? '全听音拼写，点击 🔊 可重听' : '当前无英文语音包，按首字母提示拼写') + ' · 不扣血', function () { nextMonster(); }, 1700);
   } else {
     beginStage();
   }
@@ -2942,7 +2949,9 @@ function renderQuestion() {
   var q = run.q;
   /* 移开按钮焦点：避免按 Enter/空格 误触发上一个点过的按钮 */
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-  $('q-type').textContent = TYPE_LABEL[q.type] + (q.isRevenge ? ' 　😈 复仇怪兽来袭！' : '');
+  $('q-type').textContent = (run.mode === 'dictation' && q.type === 'spell'
+    ? (TTS.ok ? '🎧 听音拼写（点击 🔊 重听）' : '🎧 听音拼写 · 无语音包，首字母提示')
+    : TYPE_LABEL[q.type]) + (q.isRevenge ? ' 　😈 复仇怪兽来袭！' : '');
   /* 词魂肉鸽·复仇骑士：复仇怪现身即倒戈，替你击退敌军 */
   if (run.rogue && run.rogue.talent === 'knight' && q.isRevenge && q.retries === 0) {
     addPressure(-10);
@@ -2954,7 +2963,7 @@ function renderQuestion() {
   $('q-options').className = 'q-options';
   $('q-spell').hidden = true;
   $('q-options').hidden = false;
-  $('btn-replay').hidden = q.type !== 'listen';
+  $('btn-replay').hidden = q.type !== 'listen' && !(run.mode === 'dictation' && q.type === 'spell' && TTS.ok);
   $('btn-hint').hidden = true;
   $('btn-hint').disabled = run.hints <= 0;
   $('hint-count').textContent = run.hints;
@@ -2987,7 +2996,18 @@ function renderQuestion() {
     prompt.className = 'q-prompt listen-prompt';
     setTimeout(function () { if (run && run.q === q) TTS.speak(q.word.w, true); }, 350);
   } else {
-    prompt.textContent = q.word.m;
+    /* 听写挑战：有语音包=纯听音拼写（题面只留 🔊）；无语音包降级为首字母提示拼写 */
+    if (run.mode === 'dictation') {
+      if (TTS.ok) {
+        prompt.innerHTML = '🔊';
+        prompt.className = 'q-prompt listen-prompt';
+        setTimeout(function () { if (run && run.q === q) TTS.speak(q.word.w, true); }, 350);
+      } else {
+        prompt.textContent = q.word.m + '　（首字母：' + q.word.w.charAt(0).toUpperCase() + '…）';
+      }
+    } else {
+      prompt.textContent = q.word.m;
+    }
     $('q-options').hidden = true;
     $('q-spell').hidden = false;
     $('btn-spell-hint').disabled = run.hints <= 0 || activeMod() === 'silence';
@@ -3167,11 +3187,16 @@ function addPressure(n) {
   }
 }
 
+var timerPendingSec = 0;   /* 接力弹层暂停期间出的新题：先存时长不起算 deadline，续跑时再开始倒计时 */
 function startTimer(sec) {
   stopTimer();
   timerDur = sec * 1000;
-  timerEnd = performance.now() + timerDur;
   lastTickT = 0;
+  /* 战斗页接力弹层暂停中：题面照常渲染，但不设 deadline（设了会按墙钟逼近，
+     长暂停后一关闭就立刻超时）——时长暂存，relayResumeBattleTimer 续跑时起算 */
+  if (relayTimerSuppressed()) { timerPendingSec = sec; timerEnd = 0; return; }
+  timerPendingSec = 0;
+  timerEnd = performance.now() + timerDur;
   tick();
 }
 function tick() {
@@ -3531,7 +3556,7 @@ function killMonster() {
   var killSeq = runEpoch;
   setTimeout(safe(function () {
     if (!run || run.ended || runEpoch !== killSeq) return;
-    if (run.mode === 'review' || run.mode === 'plan' || run.mode === 'drill') {
+    if (run.mode === 'review' || run.mode === 'plan' || run.mode === 'drill' || run.mode === 'dictation') {
       if (run.mode === 'plan') { ensurePlanDay(); save.planDay.done = run.kills; persist(); }
       if (run.kills >= run.reviewTotal) { endRun('done'); return; }
       nextMonster();
@@ -3803,6 +3828,8 @@ function endRunCore(reason) {
     }
     checkAch();
     if (run.mode === 'drill' && reason === 'done') titles.done = '🔥 强化训练完成！';
+    if (run.mode === 'dictation' && reason === 'done') titles.done = '🎧 听写挑战完成！';
+    if (run.mode === 'dictation' && reason === 'quit') titles.quit = '🏳️ 听写中途退出';
     if (run.mode === 'expedition') {
       if (reason === 'done') titles.done = '🚀 远征告捷！';
       else if (reason === 'quit') titles.quit = '🏳️ 远征撤退';
@@ -3853,6 +3880,7 @@ function endRunCore(reason) {
     if (run.mode === 'expedition') stats.push('🚀 远征积分 ' + (run.expScore || 0), '⚔️ 击杀 ' + run.kills + ' / 19',
       '📈 今日最高 ' + ((save.expedition && save.expedition.date === expDayStamp()) ? save.expedition.best : 0));
     if (run.mode === 'review') stats.push('📖 复习 ' + run.kills + ' 词');
+    if (run.mode === 'dictation') stats.push('🎧 听写 ' + run.kills + ' 词');
     if (run.mode === 'drill') stats.push('🔥 强化 ' + run.kills + ' 词');
     if (run.mode === 'plan') stats.push('🎯 计划完成 ' + run.kills + ' 词');
     stats.push('✏️ 答题 ' + run.answered + ' 题', '🎯 正确率 ' + acc + '%', '🔥 最高连击 ' + run.maxCombo, '🪙 获得 ' + run.coinsEarned, '📅 连续打卡 ' + save.streak.count + ' 天');
@@ -3887,12 +3915,15 @@ function endRunCore(reason) {
       });
     }
     $('btn-result-code').hidden = !run.poison;
+    /* 分享卡入口：毒池结算 / 每日远征结算 / 词魂肉鸽结算 */
+    $('btn-share-card').hidden = !(run.poison || run.mode === 'expedition' || run.rogue);
     /* 一键投毒顺手化：有复仇词或混淆对可投时，投毒按钮脉动提示 */
     var canPoison = buildEnc() && (run.records.some(function (r) { return r.wrong >= 2 && ENC_INDEX[r.w] !== undefined; }) ||
       topConfusePairs(2).length > 0);
     $('btn-poison-export').classList.toggle('charged', canPoison);
   } catch (e) {
     try { $('btn-result-code').hidden = true; } catch (x) {}
+    try { $('btn-share-card').hidden = true; } catch (x) {}
   }
 
   try { refreshHome(); } catch (e) {}
@@ -3914,6 +3945,7 @@ function emergencyEndRun(reason) {
     $('result-stats').textContent = '结算渲染遇到问题，本局进度已保存';
     $('result-words').innerHTML = '';
     $('btn-result-code').hidden = true;
+    $('btn-share-card').hidden = true;
     $('btn-retry-wrong').hidden = true;
   } catch (x) {}
   try { refreshHome(); } catch (x) {}
@@ -4027,6 +4059,9 @@ function updateHUD() {
     $('monster-queue').textContent = '';
   } else if (run.mode === 'drill') {
     $('battle-stage').textContent = '🔥 强化 ' + run.kills + '/' + run.reviewTotal;
+    $('monster-queue').textContent = '';
+  } else if (run.mode === 'dictation') {
+    $('battle-stage').textContent = '🎧 听写 ' + run.kills + '/' + run.reviewTotal;
     $('monster-queue').textContent = '';
   } else {
     $('battle-stage').textContent = '📖 复习 ' + run.kills + '/' + run.reviewTotal;
@@ -4219,7 +4254,7 @@ function refreshHome() {
 function openSetup(mode) {
   if (!buildEnc()) { showLoadFail(); return; }
   setupMode = mode;
-  var titles = { adventure: '🧭 出战准备', endless: '♾️ 无尽挑战', review: '📖 复习设置', expedition: '🚀 每日远征' };
+  var titles = { adventure: '🧭 出战准备', endless: '♾️ 无尽挑战', review: '📖 复习设置', expedition: '🚀 每日远征', dictation: '🎧 听写挑战' };
   $('setup-title').textContent = titles[mode] || titles.adventure;
   $('setup-diff-wrap').style.display = (mode === 'review') ? 'none' : '';
   renderSetupLists();
@@ -4231,7 +4266,8 @@ function openSetup(mode) {
      本局词量对远征无效——下拉禁用防误改（改了只会漏到以后的冒险/复习局） */
   $('setup-size').disabled = (mode === 'expedition');
   $('size-note').textContent = mode === 'review' ? '本次复习的单词数量'
-    : (mode === 'expedition' ? '远征词量由今日种子决定（20 词）' : '每关出战的单词数量');
+    : (mode === 'dictation' ? '本次听写的单词数量'
+    : (mode === 'expedition' ? '远征词量由今日种子决定（20 词）' : '每关出战的单词数量'));
 
   showScreen('scr-setup');
 }
@@ -4892,7 +4928,7 @@ function renderPoisonLog(el) {
     return;
   }
   var html = '<div class="io-log-title">🏆 投毒战绩</div>';
-  log.slice(0, 5).forEach(function (e) {
+  log.slice(0, 5).forEach(function (e, idx) {
     var role = e.role === 'set' ? '☠️ 我布的毒' : '🗡️ 我闯的毒';
     var outcome = e.role === 'set'
       ? (e.win ? '对方通关 · 毒计被破解' : '对方未通关 · 毒计成功')
@@ -4904,15 +4940,20 @@ function renderPoisonLog(el) {
       : '攻克 ' + e.cleared + '/' + e.total;
     html += '<div class="io-log-row"><span class="io-log-role">' + role + '</span>' +
       '<span class="io-log-out">' + stat + ' · ' + outcome + '</span>' +
-      '<span class="io-log-time">' + poisonAgo(e.t) + '</span></div>';
+      '<span class="io-log-time">' + poisonAgo(e.t) + '</span>' +
+      '<button class="btn btn-tiny io-log-share" data-idx="' + idx + '" title="生成这张战绩的分享卡">🖼</button></div>';
   });
   el.innerHTML = html;
 }
 
-/* 粘贴入口统一分发：W 开头 = 挑战码（应战），R 开头 = 成绩码（战报） */
+/* 粘贴入口统一分发：W 开头 = 挑战码（应战），R 开头 = 成绩码（战报），R1. 开头 = 接力码（提示去设置页） */
 function handlePoisonPaste(raw) {
   var c = (raw || '').trim();
   if (!c) { toast('请先粘贴挑战码'); return; }
+  if (c.indexOf(RELAY_TEXT_PREFIX) === 0) {
+    toast('这是接力码：请到 设置 → 📲 接力码 粘贴恢复');
+    return;
+  }
   if (c.charAt(0).toUpperCase() === 'R') {
     var rep = decodeResultCode(c);
     if (!rep) { toast('成绩码无效，请检查是否完整复制'); return; }
@@ -5229,6 +5270,12 @@ function duelFinish() {
 
 /* ========================= 键盘操作 ========================= */
 function onKey(e) {
+  /* Esc：接力码/分享卡弹层的桌面逃生通道（生成态内容高，滚动之外多一条路；
+     relayClose 会顺带续跑战斗计时） */
+  if (e.key === 'Escape') {
+    if (!$('relay-overlay').hidden) { e.preventDefault(); relayClose(); return; }
+    if (!$('share-overlay').hidden) { e.preventDefault(); $('share-overlay').hidden = true; return; }
+  }
   /* 双人对决：1-4 选项作答（当前出题方的键盘操作） */
   if ($('scr-duel') && $('scr-duel').classList.contains('active') && duel && duel.phase === 'q' && duel.q && !duel.q.locked) {
     var dn = parseInt(e.key, 10);
@@ -5293,6 +5340,7 @@ function bindEvents() {
   $('btn-endless').onclick = function () { openSetup('endless'); };
   $('btn-review').onclick = function () { openSetup('review'); };
   $('btn-expedition').onclick = function () { openSetup('expedition'); };
+  $('btn-dict').onclick = function () { openSetup('dictation'); };
   $('btn-codex').onclick = openCodex;
   $('btn-settings').onclick = openSettings;
   $('btn-help').onclick = function () { showScreen('scr-help'); };
@@ -5437,6 +5485,7 @@ function bindEvents() {
   // 结算
   $('btn-again').onclick = function () {
     if (run.mode === 'review') openSetup('review');
+    else if (run.mode === 'dictation') openSetup('dictation');
     else if (run.mode === 'plan') { showScreen('scr-home'); refreshHome(); }
     else if (run.mode === 'drill') { openWrongBook(); }
     else if (run.poison) startNightmare(run.poison.data);
@@ -5447,6 +5496,7 @@ function bindEvents() {
   $('btn-retry-wrong').onclick = retryWrong;
   $('btn-poison-export').onclick = doPoisonExport;
   $('btn-result-code').onclick = doResultExport;
+  $('btn-share-card').onclick = openShareCardForResult;
   $('btn-result-home').onclick = function () { showScreen('scr-home'); refreshHome(); };
 
   // 图鉴
@@ -5497,8 +5547,19 @@ function bindEvents() {
   // 设置 / 帮助
   bindSettings();
   $('btn-poison-set').onclick = function () { openIO('poison'); };
+  $('btn-relay-set').onclick = openRelay;
+  $('btn-battle-relay').onclick = openRelay;   /* 战斗页入口：run 活跃时生成含对局快照的接力码 */
+  relayBind();
+  bindShareOverlay();
   $('btn-settings-back').onclick = function () { showScreen('scr-home'); };
   $('btn-help-back').onclick = function () { showScreen('scr-home'); };
+  // 投毒战绩弹窗：行内「🖼 分享卡」按钮（事件委托在日志容器上）
+  $('io-poison-log').addEventListener('click', function (e) {
+    var b = e.target.closest('.io-log-share');
+    if (!b) return;
+    var entry = (save.poisonLog || [])[parseInt(b.getAttribute('data-idx'), 10)];
+    if (entry) ShareCard.share(ShareCard.fromPoisonLog(entry));
+  });
 
   // 键盘
   document.addEventListener('keydown', onKey);
@@ -5570,13 +5631,15 @@ function recoverBattle() {
   try { if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; } $('banner').hidden = true; } catch (e) {}
   try { $('memcard').hidden = true; memCb = null; } catch (e) {}
   try { $('io-overlay').hidden = true; } catch (e) {}
+  try { if (!$('relay-overlay').hidden) relayClose(); } catch (e) {}   /* 战斗页接力弹层：异常恢复时关闭并续跑计时 */
   if (run && !run.ended) {
     try {
       showScreen('scr-battle');
       setTimeout(function () {
         if (!run || run.ended) return;
         /* 宽限期内续问链已自行接手（弹了记忆卡/横幅/弹层，或题面解锁、计时在跑）→ 不重建 */
-        var busy = ($('memcard') && !$('memcard').hidden) || ($('banner') && !$('banner').hidden) || ($('io-overlay') && !$('io-overlay').hidden);
+        var busy = ($('memcard') && !$('memcard').hidden) || ($('banner') && !$('banner').hidden) || ($('io-overlay') && !$('io-overlay').hidden) ||
+          ($('relay-overlay') && !$('relay-overlay').hidden) || ($('share-overlay') && !$('share-overlay').hidden);
         if (busy) return;
         if (run.q && run.q.locked && !timerRAF) { runEpoch++; askNext(false, null); }   /* 仍冻结才重建 */
       }, 700);
@@ -5656,7 +5719,10 @@ function wdRecover(kind) {
 function watchdogCheck() {
   var now = Date.now();
   var io = $('io-overlay'), mem = $('memcard'), ban = $('banner');
-  if ((io && !io.hidden) || (mem && !mem.hidden) || (ban && !ban.hidden)) {   /* 弹层开着：交互流程中，不判停摆 */
+  var rlay = $('relay-overlay'), shrl = $('share-overlay');
+  /* 弹层开着：交互流程中，不判停摆（含战斗页 📲 接力码——计时已暂停，题面锁定属正常） */
+  if ((io && !io.hidden) || (mem && !mem.hidden) || (ban && !ban.hidden) ||
+      (rlay && !rlay.hidden) || (shrl && !shrl.hidden)) {
     wdNoScreenSince = 0; wdStuckBattleSince = 0;
     return;
   }
@@ -5742,6 +5808,1016 @@ function flushSwReload() {
   try { location.reload(); } catch (e) {}
 }
 
+/* ========================= DEFLATE 压缩（接力码专用） =========================
+   RFC1951 原始 DEFLATE 流（BTYPE=01 定长 Huffman + LZ77），自产自销：
+   生成端与恢复端跑同一份代码，不依赖浏览器 CompressionStream（旧机兼容），
+   也不引入新文件。inflate 只实现 stored + 定长块两种（本游戏只解码自己压的流，
+   遇到动态 Huffman 块直接报错——真实场景不会出现，防御性设计）。 */
+var WQ_DEFLATE = (function () {
+
+  /* ---- 位写入器（LSB-first，DEFLATE 规定方向） ---- */
+  function BitW() { this.out = []; this.cur = 0; this.n = 0; }
+  BitW.prototype.put = function (val, bits) {
+    this.cur |= (val << this.n);
+    this.n += bits;
+    while (this.n >= 8) { this.out.push(this.cur & 255); this.cur >>= 8; this.n -= 8; }
+  };
+  BitW.prototype.flush = function () {
+    if (this.n > 0) { this.out.push(this.cur & 255); this.cur = 0; this.n = 0; }
+  };
+
+  /* 定长 Huffman 字面量/长度码（295 值），MSB-first 码先翻成 LSB-first 写入 */
+  var FIXED_LIT = (function () {
+    var t = [], v, len, i;
+    for (i = 0; i <= 143; i++) { v = 0x30 + i; len = 8; t[i] = { v: rev(v, len), len: len }; }
+    for (i = 144; i <= 255; i++) { v = 0x190 + (i - 144); len = 9; t[i] = { v: rev(v, len), len: len }; }
+    for (i = 256; i <= 279; i++) { v = i - 256; len = 7; t[i] = { v: rev(v, len), len: len }; }
+    for (i = 280; i <= 287; i++) { v = 0xC0 + (i - 280); len = 8; t[i] = { v: rev(v, len), len: len }; }
+    return t;
+  })();
+  function rev(x, bits) { var r = 0; while (bits--) { r = (r << 1) | (x & 1); x >>= 1; } return r; }
+
+  var LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+  var LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+  var DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+  var DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+
+  function lenCode(len) {
+    var i = 28;
+    while (i > 0 && LEN_BASE[i] > len) i--;
+    return i;
+  }
+  function distCode(dist) {
+    var i = 29;
+    while (i > 0 && DIST_BASE[i] > dist) i--;
+    return i;
+  }
+
+  function deflate(bytes) {
+    var w = new BitW();
+    w.put(1, 1);   /* BFINAL=1：单块 */
+    w.put(1, 2);   /* BTYPE=01：定长 Huffman */
+    var n = bytes.length, head = new Int32Array(1 << 15), prev = new Int32Array(n > 0 ? n : 1);
+    var i, h, j;
+    for (i = 0; i < head.length; i++) head[i] = -1;
+    for (i = 0; i < n; i++) prev[i] = -1;
+    function hashAt(p) { return ((bytes[p] << 10) ^ (bytes[p + 1] << 5) ^ bytes[p + 2]) & 32767; }
+    function insert(p) { h = hashAt(p); prev[p & 32767] = head[h]; head[h] = p; }
+    var pos = 0, chain, cand, best, bestDist, l, maxLen;
+    while (pos < n) {
+      best = 0; bestDist = 0;
+      if (pos + 3 <= n) {
+        h = hashAt(pos);
+        cand = head[h]; chain = 0;
+        maxLen = n - pos > 258 ? 258 : n - pos;
+        while (cand >= 0 && chain < 128 && pos - cand <= 32768) {
+          if (bytes[cand + best] === bytes[pos + best]) {   /* 快速预筛：先比当前最优位的下一字节 */
+            l = 0;
+            while (l < maxLen && bytes[cand + l] === bytes[pos + l]) l++;
+            if (l > best) { best = l; bestDist = pos - cand; if (l >= maxLen) break; }
+          }
+          cand = prev[cand & 32767];
+          chain++;
+        }
+      }
+      if (best >= 3) {
+        var lc = lenCode(best);
+        var lit = FIXED_LIT[257 + lc];
+        w.put(lit.v, lit.len);
+        if (LEN_EXTRA[lc]) w.put(best - LEN_BASE[lc], LEN_EXTRA[lc]);
+        var dc = distCode(bestDist);
+        w.put(rev(dc, 5), 5);   /* 距离码：5 位定长，MSB-first → 先翻转再按 LSB-first 写 */
+        if (DIST_EXTRA[dc]) w.put(bestDist - DIST_BASE[dc], DIST_EXTRA[dc]);
+        for (j = 0; j < best; j++) { if (pos + 2 < n) insert(pos); pos++; }
+      } else {
+        var lb = FIXED_LIT[bytes[pos]];
+        w.put(lb.v, lb.len);
+        if (pos + 2 < n) insert(pos);
+        pos++;
+      }
+    }
+    var eob = FIXED_LIT[256];
+    w.put(eob.v, eob.len);
+    w.flush();
+    return w.out;
+  }
+
+  /* ---- 位读取器 ---- */
+  function BitR(arr) { this.a = arr; this.p = 0; this.cur = 0; this.n = 0; }
+  BitR.prototype.get = function (bits) {
+    while (this.n < bits) {
+      if (this.p >= this.a.length) throw new Error('deflate: unexpected EOF');
+      this.cur |= this.a[this.p++] << this.n;
+      this.n += 8;
+    }
+    var v = this.cur & ((1 << bits) - 1);
+    this.cur >>= bits; this.n -= bits;
+    return v;
+  };
+  BitR.prototype.align = function () { this.cur = 0; this.n = 0; };   /* 本实现对齐时无半字节缓存，直接丢 */
+
+  function inflate(arr) {
+    var r = new BitR(arr), out = [];
+    for (;;) {
+      var bfinal = r.get(1), btype = r.get(2);
+      if (btype === 0) {                      /* stored */
+        r.align();
+        if (r.p + 4 > r.a.length) throw new Error('deflate: bad stored header');
+        var len = r.a[r.p] | (r.a[r.p + 1] << 8); r.p += 2;
+        var nlen = r.a[r.p] | (r.a[r.p + 1] << 8); r.p += 2;
+        if ((len ^ 0xFFFF) !== nlen) throw new Error('deflate: stored length check failed');
+        for (var s = 0; s < len; s++) out.push(r.a[r.p + s]);
+        r.p += len;
+      } else if (btype === 1) {               /* 定长 Huffman */
+        for (;;) {
+          /* 逐位读入，按定长码表判定（码长 7/8/9） */
+          var code = 0, codelen = 0, sym = -1;
+          for (;;) {
+            code = (code << 1) | r.get(1);
+            codelen++;
+            if (codelen === 7) { if (code <= 0x17) { sym = 256 + code; break; } }
+            else if (codelen === 8) {
+              if (code >= 0x30 && code <= 0xBF) { sym = code - 0x30; break; }
+              if (code >= 0xC0 && code <= 0xC7) { sym = 280 + (code - 0xC0); break; }
+            } else if (codelen === 9) {
+              if (code >= 0x190) { sym = 144 + (code - 0x190); break; }
+              throw new Error('deflate: bad fixed code');
+            }
+          }
+          if (sym === 256) break;
+          if (sym < 256) { out.push(sym); continue; }
+          var lc2 = sym - 257;
+          if (lc2 > 28) throw new Error('deflate: bad length symbol');
+          var len2 = LEN_BASE[lc2] + (LEN_EXTRA[lc2] ? r.get(LEN_EXTRA[lc2]) : 0);
+          /* 距离码同为 Huffman 码（MSB-first）：先按 LSB-first 读 5 个原始位，再翻回码值 */
+          var dc2 = rev(r.get(5), 5);
+          if (dc2 > 29) throw new Error('deflate: bad dist symbol');
+          var dist = DIST_BASE[dc2] + (DIST_EXTRA[dc2] ? r.get(DIST_EXTRA[dc2]) : 0);
+          if (dist > out.length) throw new Error('deflate: dist too far');
+          var from = out.length - dist;
+          for (var k = 0; k < len2; k++) out.push(out[from + k]);   /* 重叠区逐字节复制 */
+        }
+      } else {
+        throw new Error('deflate: dynamic Huffman block not supported');
+      }
+      if (bfinal) break;
+    }
+    return out;
+  }
+
+  /* CRC16-CCITT（0xFFFF 初值，poly 0x1021）：分片合并后校验整包完整性 */
+  var CRC_TABLE = (function () {
+    var t = [], i, j, c;
+    for (i = 0; i < 256; i++) {
+      c = i << 8;
+      for (j = 0; j < 8; j++) c = (c & 0x8000) ? ((c << 1) ^ 0x1021) : (c << 1);
+      t[i] = c & 0xFFFF;
+    }
+    return t;
+  })();
+  function crc16(bytes) {
+    var c = 0xFFFF;
+    for (var i = 0; i < bytes.length; i++) c = ((c << 8) & 0xFFFF) ^ CRC_TABLE[((c >> 8) ^ bytes[i]) & 0xFF];
+    return c ^ 0xFFFF;
+  }
+
+  return { deflate: deflate, inflate: inflate, crc16: crc16 };
+})();
+
+/* ========================= 接力码（跨设备搬档，零服务器） =========================
+   把 wq_save_v1 全量存档 DEFLATE 压缩 + base64url 编码，编成一张或多张二维码；
+   扫码即打开本游戏网址（hash 携带 #r=分片 协议），集齐分片→CRC 校验→确认覆盖→恢复。
+   语义=复制不是移动：源设备存档原样保留，两台设备各自独立继续。
+   容量实测标定（本仓 libs/qrcode.min.js，ECC M）：
+   - 819 字符 URL（109 模块）经 PNG 栅格化后 OpenCV 双端解码通过；
+   - 每张二维码整链 URL 上限取 900 字符（模块数 ≤ ~110，手机相机稳定识别）；
+   - 超出自动分片：#r=i/n.<base64url>，恢复端集齐 n 片按序拼接后整包 CRC 校验合并。
+   压缩对比：同一份数据分别按「DEFLATE 压缩」与「原样存储」编码，取更小者
+   （随机数据 DEFLATE 反而膨胀 ~5%，小存档也常出现，故必须对比）。 */
+var RELAY_PARTS_KEY = 'wq_relay_parts';     /* localStorage：分片收集进度（逐张扫码跨页面累积，30 分钟时效） */
+var RESUME_RUN_KEY = 'wq_relay_resume';     /* localStorage：恢复后待续的对局快照（读后即焚，当日有效） */
+var RELAY_QR_MAX_URL = 900;                 /* 单张二维码整链 URL 上限（实测标定，见上） */
+var RELAY_TEXT_PREFIX = 'R1.';              /* 文本形态接力码前缀（与成绩码 R 开头区分：R1. 固定两字符） */
+
+/* ---------- base64url（RFC4648 §5，无填充，字节 <-> 字符串） ---------- */
+var WQ_B64CH = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+function wqB64Enc(bytes) {
+  var out = '', i = 0, n = bytes.length;
+  while (i < n) {
+    var b0 = bytes[i], b1 = i + 1 < n ? bytes[i + 1] : -1, b2 = i + 2 < n ? bytes[i + 2] : -1;
+    out += WQ_B64CH[b0 >> 2];
+    out += b1 >= 0 ? WQ_B64CH[((b0 & 3) << 4) | (b1 >> 4)] : WQ_B64CH[(b0 & 3) << 4];
+    if (b2 >= 0) {
+      out += WQ_B64CH[((b1 & 15) << 2) | (b2 >> 6)];
+      out += WQ_B64CH[b2 & 63];
+    } else if (b1 >= 0) {
+      out += WQ_B64CH[(b1 & 15) << 2];
+    }
+    i += 3;
+  }
+  return out;
+}
+function wqB64Dec(str) {
+  var out = [], buf = 0, bits = 0, i;
+  for (i = 0; i < str.length; i++) {
+    var v = WQ_B64CH.indexOf(str.charAt(i));
+    if (v < 0) throw new Error('relay: bad base64url char');
+    buf = (buf << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((buf >> bits) & 255);
+    }
+  }
+  if (bits >= 6) throw new Error('relay: dangling base64 bits');   /* 4/3 对不齐=被截断 */
+  return out;
+}
+
+/* ---------- UTF-8（存档 JSON -> 字节流；ES5 手写，不依赖 TextEncoder） ---------- */
+function wqUtf8Enc(str) {
+  var out = [];
+  for (var i = 0; i < str.length; i++) {
+    var c = str.charCodeAt(i);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xC0 | (c >> 6), 0x80 | (c & 63));
+    else if (c >= 0xD800 && c <= 0xDBFF && i + 1 < str.length) {
+      var lo = str.charCodeAt(i + 1);
+      if (lo >= 0xDC00 && lo <= 0xDFFF) {
+        i++;
+        var cp = 0x10000 + ((c & 0x3FF) << 10) | (lo & 0x3FF);
+        out.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 63), 0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
+      } else out.push(0xEF, 0xBF, 0xBD);   /* 孤立代理项 -> U+FFFD */
+    } else out.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return out;
+}
+function wqUtf8Dec(bytes) {
+  var out = '', i = 0;
+  while (i < bytes.length) {
+    var b = bytes[i];
+    var cp;
+    if (b < 0x80) { cp = b; i += 1; }
+    else if (b >= 0xC0 && b < 0xE0 && i + 1 < bytes.length) { cp = ((b & 31) << 6) | (bytes[i + 1] & 63); i += 2; }
+    else if (b >= 0xE0 && b < 0xF0 && i + 2 < bytes.length) { cp = ((b & 15) << 12) | ((bytes[i + 1] & 63) << 6) | (bytes[i + 2] & 63); i += 3; }
+    else if (b >= 0xF0 && b < 0xF8 && i + 3 < bytes.length) {
+      cp = ((b & 7) << 18) | ((bytes[i + 1] & 63) << 12) | ((bytes[i + 2] & 63) << 6) | (bytes[i + 3] & 63);
+      i += 4;
+      cp -= 0x10000;
+      out += String.fromCharCode(0xD800 + (cp >> 10), 0xDC00 + (cp & 0x3FF));
+      continue;
+    } else { out += '\uFFFD'; i += 1; continue; }
+    out += String.fromCharCode(cp);
+  }
+  return out;
+}
+
+/* ========================= 接力码 编解码 =========================
+   二进制 payload：'W'(0x57) 'Q'(0x51) ver flags crc16_hi crc16_lo body...
+   flags bit0 = body 已 DEFLATE 压缩；bit1 = 携带对局快照（run 级接力，第二层）
+   body = UTF-8 JSON：{ v:1, t:时间戳, save:{...全量存档}, run:{...对局快照或 null} }
+   文本/分片形态：<text> = RELAY_TEXT_PREFIX + base64url(payload)
+   hash  协议：#r=<i>/<n>.<base64url(该分片字节)>，i 从 1 起；n=1 时单片。 */
+function relayBuildPayload(includeRun) {
+  var obj = { v: 1, t: Date.now(), save: save, run: includeRun ? relayRunSnapshot() : null };
+  var json = JSON.stringify(obj);
+  var raw = wqUtf8Enc(json);
+  var packed = WQ_DEFLATE.deflate(raw);
+  var useDeflate = packed.length < raw.length;   /* 压缩对比取小者：随机/小存档压缩会膨胀 */
+  var body = useDeflate ? packed : raw;
+  var flags = (useDeflate ? 1 : 0) | (obj.run ? 2 : 0);
+  var head = [0x57, 0x51, 1, flags];
+  var crc = WQ_DEFLATE.crc16(body);
+  head.push((crc >> 8) & 255, crc & 255);
+  return head.concat(body);
+}
+function relayParsePayload(bytes) {
+  if (bytes.length < 7 || bytes[0] !== 0x57 || bytes[1] !== 0x51) throw new Error('relay: bad magic');
+  var ver = bytes[2], flags = bytes[3];
+  if (ver !== 1) throw new Error('relay: unsupported version ' + ver);
+  var crc = (bytes[4] << 8) | bytes[5];
+  var body = bytes.slice(6);
+  if (WQ_DEFLATE.crc16(body) !== crc) throw new Error('relay: CRC mismatch');
+  var json = wqUtf8Dec(flags & 1 ? WQ_DEFLATE.inflate(body) : body);
+  var obj = JSON.parse(json);
+  if (!obj || obj.v !== 1 || !obj.save || typeof obj.save !== 'object') throw new Error('relay: bad body');
+  return obj;
+}
+function relayBuildCode(includeRun) {
+  return RELAY_TEXT_PREFIX + wqB64Enc(relayBuildPayload(includeRun));
+}
+/* 文本 -> 完整 payload（接受：R1.xxx 原文 / 含 #r=i/n.xxx 的链接 / i=n 的单分片） */
+function relayTextToPayload(text) {
+  var t = (text || '').trim();
+  if (!t) throw new Error('relay: empty');
+  var m = /#r=([0-9]{1,3})\/([0-9]{1,3})\.([A-Za-z0-9_-]+)/.exec(t);
+  if (m) {
+    if (m[2] !== '1' || m[1] !== '1') return { needShards: parseInt(m[2], 10) };   /* 多片文本：交给分片收集 */
+    return wqB64Dec(m[3]);
+  }
+  if (t.indexOf(RELAY_TEXT_PREFIX) === 0) return wqB64Dec(t.slice(RELAY_TEXT_PREFIX.length));
+  var m2 = /^([0-9]{1,3})\/([0-9]{1,3})\.([A-Za-z0-9_-]+)$/.exec(t);
+  if (m2) {
+    if (m2[2] !== '1' || m2[1] !== '1') return { needShards: parseInt(m2[2], 10) };
+    return wqB64Dec(m2[3]);
+  }
+  throw new Error('relay: unrecognized text');
+}
+
+/* ---------- 分片协议（#r=i/n.<b64>）：按字节均分，恢复端集齐按序拼接 ---------- */
+function relayShardPayload(bytes, total) {
+  var n = Math.max(1, total | 0);
+  var per = Math.ceil(bytes.length / n);
+  var shards = [];
+  for (var i = 0; i < n; i++) shards.push(bytes.slice(i * per, Math.min((i + 1) * per, bytes.length)));
+  return shards;
+}
+/* 生成端：按单码 URL 上限算分片数，返回 {shards:[{i,n,b64}], n} */
+function relayPlanShards(payload, baseLen) {
+  var b64 = wqB64Enc(payload);
+  var b64Total = b64.length;
+  var avail = RELAY_QR_MAX_URL - baseLen - 10;   /* '#r=' + 'i/n.' 最长 '99/99.' 共 9，留 1 余量 */
+  if (avail < 200) avail = 200;                  /* 极长部署路径兜底：至少给出可用分片 */
+  var n = Math.max(1, Math.ceil(b64Total / avail));
+  var bytes = payload;
+  var shards = [];
+  if (n === 1) {
+    shards.push(b64);
+  } else {
+    var per = Math.ceil(bytes.length / n);
+    for (var i = 0; i < n; i++) shards.push(wqB64Enc(bytes.slice(i * per, Math.min((i + 1) * per, bytes.length))));
+  }
+  return { shards: shards, n: n, b64Total: b64Total };
+}
+function relayPartsLoad() {
+  try {
+    var v = JSON.parse(localStorage.getItem(RELAY_PARTS_KEY) || 'null');
+    /* 时效：30 分钟内未集齐视为弃单（部分浏览器/隐私模式可能跨页清空收集进度，
+       用 localStorage 而非 sessionStorage 已实测更稳；过期自动重来，不留半包） */
+    if (v && typeof v.n === 'number' && v.parts && typeof v.parts === 'object') {
+      if (v.t && Date.now() - v.t > 30 * 60000) return { n: 0, parts: {} };
+      return v;
+    }
+  } catch (e) {}
+  return { n: 0, parts: {} };
+}
+function relayPartsSave(p) {
+  try { p.t = Date.now(); localStorage.setItem(RELAY_PARTS_KEY, JSON.stringify(p)); } catch (e) {}
+}
+function relayPartsClear() { try { localStorage.removeItem(RELAY_PARTS_KEY); } catch (e) {} }
+/* 收下一片：返回 {done:false, got:i, n} 或 {done:true, obj} 或抛错 */
+function relayAcceptShard(i, n, b64) {
+  if (!n || n < 1 || n > 99 || !i || i < 1 || i > n) throw new Error('relay: bad shard header');
+  wqB64Dec(b64);   /* 严格解码即校验本片完整性 */
+  var st = relayPartsLoad();
+  if (st.n !== n) st = { n: n, parts: {} };   /* 换了新的一批：重新收集 */
+  st.parts[i] = b64;
+  relayPartsSave(st);
+  var got = Object.keys(st.parts).length;
+  if (got < n) return { done: false, got: got, n: n };
+  var all = [];
+  for (var k = 1; k <= n; k++) {
+    var part = st.parts[k];
+    if (!part) return { done: false, got: got - 1, n: n };
+    all = all.concat(wqB64Dec(part));
+  }
+  var obj = relayParsePayload(all);   /* 整包 CRC 在此把关 */
+  relayPartsClear();
+  return { done: true, obj: obj };
+}
+
+/* 恢复存档（reload）后：localStorage 里带着对局快照（读后即焚）→ 询问是否续接 */
+function relayResumeAfterReload() {
+  var raw = null;
+  try {
+    raw = localStorage.getItem(RESUME_RUN_KEY);
+    localStorage.removeItem(RESUME_RUN_KEY);   /* 无论选不选都只问这一次 */
+  } catch (e) {}
+  if (!raw) return;
+  var snap = null;
+  try { snap = JSON.parse(raw); } catch (e) {}
+  var s = relaySanitizeSnapshot(snap && snap.run ? snap.run : snap);
+  if (!s) return;
+  /* 当日有效：隔天的对局快照不再弹（城防/横幅状态早过期了） */
+  if (snap && snap.t && new Date(snap.t).toDateString() !== new Date().toDateString()) return;
+  if (confirm('接力码里带着一局进行中的对局：第 ' + s.stage + ' 关 · 城防 ' + s.pressure + '% · 连击 ×' + s.combo +
+      '。现在续接吗？（取消=只恢复存档，从主页重新开局）')) {
+    relayResumeRun(s);
+  }
+}
+
+/* ---------- 对局快照（大胆层：run 级接力，第二层） ----------
+   只覆盖低风险通道：冒险/无尽（含词魂肉鸽、主题包）。毒池局由挑战码承载、
+   远征局词池按日期种子生成，二者不做 run 级接力（帮助页已如实标注）。 */
+function relayRunSnapshot() {
+  if (!run || run.ended) return null;
+  if (run.mode !== 'adventure' && run.mode !== 'endless') return null;
+  if (run.poison) return null;
+  return {
+    mode: run.mode,
+    diffKey: run.diffKey || 'normal',
+    listIds: (run.listIds || []).slice(0, 8),
+    stage: Math.max(1, run.stage | 0),
+    killedInStage: Math.max(0, run.killedInStage | 0),
+    stageSize: Math.max(0, run.stageSize | 0),
+    bossStage: !!run.bossStage,
+    bossMod: run.bossMod || '',
+    pressure: Math.max(0, Math.min(100, Math.round(run.pressure || 0))),
+    combo: Math.max(0, run.combo | 0),
+    maxCombo: Math.max(0, run.maxCombo | 0),
+    kills: Math.max(0, run.kills | 0),
+    coinsEarned: Math.max(0, run.coinsEarned | 0),
+    answered: Math.max(0, run.answered | 0),
+    correct: Math.max(0, run.correct | 0),
+    shields: Math.max(0, run.shields | 0),
+    hints: Math.max(0, run.hints | 0),
+    recent: (run.recent || []).slice(-3),
+    rogue: run.rogue ? { talent: run.rogue.talent, curse: run.rogue.curse, chainN: run.rogue.chainN | 0 } : null,
+    packId: run.packId || ''
+  };
+}
+function relaySanitizeSnapshot(s) {
+  if (!s || typeof s !== 'object') return null;
+  if (s.mode !== 'adventure' && s.mode !== 'endless') return null;
+  if ((typeof BOSS_MODS === 'undefined') || (s.bossMod && !BOSS_MODS[s.bossMod])) s.bossMod = '';
+  var ids = (s.listIds instanceof Array ? s.listIds : []).filter(function (id) {
+    return typeof id === 'string' && typeof listById === 'function' && !!listById(id);
+  }).slice(0, 8);
+  if (!ids.length) return null;
+  return {
+    mode: s.mode,
+    diffKey: typeof s.diffKey === 'string' ? s.diffKey : 'normal',
+    listIds: ids,
+    stage: intOr(s.stage, 1, 1, 999),
+    killedInStage: intOr(s.killedInStage, 0, 0, 100),
+    stageSize: intOr(s.stageSize, 0, 0, 100),
+    bossStage: !!s.bossStage,
+    bossMod: s.bossMod || '',
+    pressure: intOr(s.pressure, 0, 0, 99),
+    combo: intOr(s.combo, 0, 0, 9999),
+    maxCombo: intOr(s.maxCombo, 0, 0, 9999),
+    kills: intOr(s.kills, 0, 0, 99999),
+    coinsEarned: intOr(s.coinsEarned, 0, 0, 9999999),
+    answered: intOr(s.answered, 0, 0, 99999),
+    correct: intOr(s.correct, 0, 0, 99999),
+    shields: intOr(s.shields, 0, 0, 50),
+    hints: intOr(s.hints, 0, 0, 50),
+    recent: (s.recent instanceof Array ? s.recent : []).filter(function (w) { return typeof w === 'string'; }).slice(-3),
+    rogue: (s.rogue && typeof s.rogue === 'object') ? { talent: String(s.rogue.talent || ''), curse: String(s.rogue.curse || ''), chainN: intOr(s.rogue.chainN, 0, 0, 999) } : null,
+    packId: typeof s.packId === 'string' ? s.packId : ''
+  };
+}
+/* 恢复后续局：startRun 重建词池与 UI，再回拨到快照关卡/城防/连击（第二次 beginStage
+   会顶掉第一块横幅——showBanner 内部 clearTimeout 保证单回调） */
+function relayResumeRun(snap) {
+  var s = relaySanitizeSnapshot(snap);
+  if (!s) { toast('对局快照不可用，已恢复存档部分'); return; }
+  var rogueCfg = s.rogue && s.rogue.talent ? { talent: s.rogue.talent, curse: s.rogue.curse } : null;
+  startRun(s.mode, s.listIds, s.diffKey, null, rogueCfg);
+  if (!run || run.ended) { toast('对局续接失败，可从主页重新开局'); return; }
+  run.stage = s.stage;
+  run.packId = s.packId && typeof packById === 'function' && packById(s.packId) ? s.packId : '';
+  runEpoch++;                     /* startRun 第一块横幅的续问链作废 */
+  beginStage();                   /* 在正确关卡重新起手（横幅文本/词缀/主题随之刷新） */
+  if (s.bossStage) run.bossStage = true;
+  if (s.bossMod && BOSS_MODS[s.bossMod]) run.bossMod = s.bossMod;
+  if (run.bossStage && !run.bossMod && run.mode === 'adventure' && !run.rogue) run.bossMod = rnd(Object.keys(BOSS_MODS));
+  if (s.stageSize > 0) run.stageSize = s.stageSize;
+  /* 快照的关卡内击杀数钳到 [0, stageSize-1]：stageSize<=1（BOSS 关）或越界时归 0 */
+  run.killedInStage = (run.stageSize > 1) ? Math.max(0, Math.min(run.stageSize - 1, s.killedInStage)) : 0;
+  run.pressure = s.pressure;
+  run.combo = s.combo;
+  run.maxCombo = Math.max(s.maxCombo, s.combo);
+  run.kills = s.kills;
+  run.coinsEarned = s.coinsEarned;
+  run.answered = s.answered;
+  run.correct = s.correct;
+  run.shields = s.shields;
+  run.hints = s.hints;
+  run.recent = s.recent.slice();
+  updateHUD();
+  toast('⏩ 已续接对局：第 ' + s.stage + ' 关 · 城防 ' + s.pressure + '% · 连击 ×' + s.combo);
+}
+
+/* ---------- 二维码绘制（libs/qrcode.min.js · MIT，模块级自绘保持像素感） ---------- */
+function relayQrAvailable() { return typeof qrcode === 'function'; }
+function drawQrTo(canvas, text, cssSize) {
+  if (!relayQrAvailable()) throw new Error('qrcode lib missing');
+  var q = qrcode(0, 'M');
+  q.addData(text, 'Byte');
+  q.make();
+  var n = q.getModuleCount(), quiet = 4;
+  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  var px = Math.round(cssSize * dpr);
+  canvas.width = px;
+  canvas.height = px;
+  canvas.style.width = cssSize + 'px';
+  canvas.style.height = cssSize + 'px';
+  var c = canvas.getContext('2d');
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.fillStyle = '#fdfcff';
+  c.fillRect(0, 0, px, px);
+  c.fillStyle = '#1a1440';
+  var cell = Math.floor(px / (n + quiet * 2));
+  var off = Math.floor((px - cell * n) / 2);
+  for (var r = 0; r < n; r++) {
+    for (var col = 0; col < n; col++) {
+      if (q.isDark(r, col)) c.fillRect(off + col * cell, off + r * cell, cell, cell);
+    }
+  }
+  return n;
+}
+
+/* ---------- 接力码 UI ---------- */
+var relayUi = { shards: null, n: 1, page: 1, baseLen: 0, incoming: null };
+function relayBaseUrlLen() {
+  try {
+    return (location.origin + location.pathname).length;
+  } catch (e) { return 40; }
+}
+/* 战斗中打开接力弹层：答题计时与压境推进必须真暂停（否则二维码还没扫完城墙先破）。
+   两个窗口都要盖住：① 打开瞬间已有题在倒计时——只停 rAF 不够，timerEnd 仍按墙钟
+   逼近，长暂停后一关闭当前题立即超时扣城防，故暂停时记下剩余毫秒、续跑时重设
+   timerEnd=now+剩余（deadline 冻结）；② 打开瞬间正逢关卡横幅（run.q 为空）——
+   横幅回调随后出的新题在 startTimer 里被抑制闸暂存时长、不起算 deadline，续跑时
+   从关闭瞬间起算全额时间。 */
+
+var relayBattlePaused = false, relayPausedLeftMs = 0;
+function relayTimerSuppressed() {
+  return relayBattlePaused && !$('relay-overlay').hidden;
+}
+function relayPauseBattleTimer() {
+  var act = null;
+  try { act = document.querySelector('.screen.active'); } catch (e) {}
+  if (run && !run.ended && act && act.id === 'scr-battle') {
+    /* 真暂停：冻结 deadline——只停 rAF 的话 timerEnd 仍按墙钟逼近，
+       弹窗停留超过剩余时间后一关闭当前题立即超时扣城防（与「计时自动暂停」
+       的承诺不符）。这里记下此刻剩余毫秒，续跑时重设 timerEnd=now+剩余。 */
+    relayPausedLeftMs = (run.q && !run.q.locked && timerRAF && timerEnd > 0)
+      ? Math.max(0, timerEnd - performance.now()) : 0;
+    stopTimer();
+    try { cancelCharge(); } catch (e) {}   /* 暂停期间蓄力链也一并取消 */
+    relayBattlePaused = true;
+  } else {
+    relayBattlePaused = false;
+    relayPausedLeftMs = 0;
+  }
+}
+function relayResumeBattleTimer() {
+  if (!relayBattlePaused) return;
+  relayBattlePaused = false;
+  if (!run || run.ended || !run.q || run.q.locked || timerRAF) { relayPausedLeftMs = 0; timerPendingSec = 0; return; }
+  /* 暂停期间新出的题（startTimer 暂存时长未起算）优先：从现在起算全额时间 */
+  if (timerPendingSec > 0) {
+    timerEnd = performance.now() + timerPendingSec * 1000;
+    timerPendingSec = 0;
+  } else if (relayPausedLeftMs > 0) {
+    timerEnd = performance.now() + relayPausedLeftMs;   /* 冻结的剩余值起算 */
+  }
+  relayPausedLeftMs = 0;
+  if (timerEnd > performance.now()) { lastTickT = 0; tick(); }
+}
+function relayClose() {
+  $('relay-overlay').hidden = true;
+  relayResumeBattleTimer();
+}
+function openRelay() {
+  relayUi.incoming = null;
+  $('relay-gen').hidden = false;
+  $('relay-recv').hidden = false;
+  $('relay-confirm').hidden = true;
+  $('relay-qr-wrap').hidden = true;
+  $('relay-text').value = '';
+  $('relay-in-text').value = '';
+  $('relay-cap').textContent = '';
+  $('relay-parts-note').textContent = relayPartsNote();
+  $('relay-run-opt').hidden = !(run && !run.ended && (run.mode === 'adventure' || run.mode === 'endless') && !run.poison);
+  $('relay-include-run').checked = true;
+  $('relay-overlay').hidden = false;
+  relayPauseBattleTimer();   /* 战斗页 📲 入口：打开即暂停计时，关闭/取消时续跑 */
+}
+function relayPartsNote() {
+  var st = relayPartsLoad();
+  if (!st.n) return '';
+  var got = Object.keys(st.parts).length;
+  return '已收集 ' + got + '/' + st.n + ' 片（本浏览器内自动暂存，集齐后合并校验）';
+}
+function relayGenerate() {
+  try {
+    if (!relayQrAvailable()) { toast('二维码库未加载（libs/qrcode.min.js）'); return; }
+    var includeRun = !$('relay-run-opt').hidden && $('relay-include-run').checked;
+    var payload = relayBuildPayload(includeRun);
+    relayUi.baseLen = relayBaseUrlLen();
+    var plan = relayPlanShards(payload, relayUi.baseLen);
+    relayUi.shards = plan.shards;
+    relayUi.n = plan.n;
+    relayUi.page = 1;
+    var rawLen = wqUtf8Enc(JSON.stringify({ v: 1, t: 0, save: save, run: null })).length;
+    $('relay-cap').textContent = '存档 ' + (rawLen / 1024).toFixed(1) + 'KB → 压缩后 ' +
+      (payload.length / 1024).toFixed(1) + 'KB · 分 ' + plan.n + ' 张码';
+    $('relay-text').value = RELAY_TEXT_PREFIX + wqB64Enc(payload);
+    $('relay-qr-wrap').hidden = false;
+    relayShowPage();
+  } catch (e) {
+    noteError('relayGenerate', e);
+    try { toast('接力码生成失败：' + (e && e.message)); } catch (x) {}
+  }
+}
+function relayShowPage() {
+  var i = relayUi.page;
+  var url = relayShardUrl(i, relayUi.n, relayUi.shards[i - 1]);
+  drawQrTo($('relay-qr'), url, 280);
+  $('relay-page-info').textContent = '第 ' + i + '/' + relayUi.n + ' 片';
+}
+function relayShardUrl(i, n, b64) {
+  var base = location.origin + location.pathname;
+  return base + '#r=' + i + '/' + n + '.' + b64;
+}
+/* hash 到货（页面加载后 init 调一次；也支持手动粘贴同样的文本） */
+function relayCheckHash() {
+  var m = /#r=([0-9]{1,3})\/([0-9]{1,3})\.([A-Za-z0-9_-]+)/.exec(location.hash || '');
+  if (!m) return false;
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  try {
+    var res = relayAcceptShard(parseInt(m[1], 10), parseInt(m[2], 10), m[3]);
+    if (res.done) { relayShowConfirm(res.obj); return true; }
+    openRelay();
+    $('relay-parts-note').textContent = '已收到第 ' + m[1] + '/' + m[2] + ' 片 · 共收集 ' + res.got + '/' + res.n +
+      ' 片——请继续扫下一张（进度已暂存，中途刷新不丢）';
+    return true;
+  } catch (e) {
+    openRelay();
+    $('relay-parts-note').textContent = '接力码解析失败：' + (e && e.message);
+    return true;
+  }
+}
+function relayRestorePaste() {
+  var t = $('relay-in-text').value;
+  try {
+    var payload = relayTextToPayload(t);
+    if (payload && payload.needShards) {
+      toast('这是 ' + payload.needShards + ' 片分片码：请按顺序逐张扫码（或粘贴完整 R1. 文本）');
+      return;
+    }
+    var obj = relayParsePayload(payload);
+    relayShowConfirm(obj);
+  } catch (e) {
+    toast('接力码无效：' + (e && e.message));
+  }
+}
+/* 恢复确认：先把接收设备现有存档导出为一次性备份接力码（防误覆盖丢档）。
+   注意必须自己打开 #relay-overlay：hash 扫码集齐最后一片时（relayCheckHash 的
+   done 路径）此前从未走过 openRelay，只切内部 section 会停在「弹层关着、确认框
+   备好却没人看见」的死胡同——单片码同一条路径同样命中。 */
+function relayShowConfirm(obj) {
+  $('relay-overlay').hidden = false;
+  var cleaned = sanitizeSave(obj.save);
+  relayUi.incoming = { save: cleaned, run: relaySanitizeSnapshot(obj.run), t: obj.t };
+  $('relay-gen').hidden = true;
+  $('relay-recv').hidden = true;
+  $('relay-confirm').hidden = false;
+  var m = cleaned.mastery || {};
+  var words = 0;
+  for (var k in m) if (ownKey(m, k)) words++;
+  var when = obj.t ? new Date(obj.t) : null;
+  $('relay-warn').innerHTML = '收到存档：🪙 ' + cleaned.coins + ' · ⭐ Lv.' + cleaned.level + ' · 📚 已学 ' + words +
+    ' 词' + (when ? ' · 存档时间 ' + when.toLocaleString() : '') +
+    '<br><b>恢复将覆盖本机现有进度</b>。下方已自动生成一次性备份接力码——复制保存后，本机进度随时可以再搬回来。' +
+    '（接力=复制不是移动：发送设备的存档不受影响，两台设备各自独立继续。）';
+  try {
+    $('relay-backup-text').value = relayBuildCode(false);
+  } catch (e) {
+    $('relay-backup-text').value = '（备份码生成失败：' + (e && e.message) + '）';
+  }
+  var hasRun = !!relayUi.incoming.run;
+  $('relay-resume-opt').hidden = !hasRun;
+  if (hasRun) $('relay-resume-stage').textContent = String(relayUi.incoming.run.stage);
+}
+function relayApply() {
+  var inc = relayUi.incoming;
+  if (!inc) return;
+  try {
+    persistCancel();   /* 撤销挂起写入：防旧档在 reload 前覆盖恢复档 */
+    localStorage.setItem(SAVE_KEY, JSON.stringify(inc.save));
+    try {
+      if (!$('relay-resume-opt').hidden && $('relay-resume-run').checked && inc.run) {
+        localStorage.setItem(RESUME_RUN_KEY, JSON.stringify({ run: inc.run, t: Date.now() }));
+      } else {
+        localStorage.removeItem(RESUME_RUN_KEY);
+      }
+    } catch (e) {}
+    location.reload();
+  } catch (e) {
+    toast('恢复失败：' + (e && e.message));
+  }
+}
+function relayBind() {
+  $('btn-relay-gen').onclick = relayGenerate;
+  $('btn-relay-prev').onclick = function () {
+    if (!relayUi.shards) return;
+    relayUi.page = relayUi.page <= 1 ? relayUi.n : relayUi.page - 1;
+    relayShowPage();
+  };
+  $('btn-relay-next').onclick = function () {
+    if (!relayUi.shards) return;
+    relayUi.page = relayUi.page >= relayUi.n ? 1 : relayUi.page + 1;
+    relayShowPage();
+  };
+  $('btn-relay-copy').onclick = function () {
+    var ta = $('relay-text');
+    ta.focus(); ta.select();
+    try { document.execCommand('copy'); toast('已复制完整接力码文本'); } catch (e) { toast('请手动全选复制'); }
+  };
+  $('btn-relay-restore').onclick = relayRestorePaste;
+  $('btn-relay-backup-copy').onclick = function () {
+    var ta = $('relay-backup-text');
+    ta.focus(); ta.select();
+    try { document.execCommand('copy'); toast('备份码已复制，粘贴保存到备忘录/聊天即可'); } catch (e) { toast('请手动全选复制'); }
+  };
+  $('btn-relay-cancel').onclick = function () {
+    relayUi.incoming = null;
+    relayClose();
+  };
+  $('btn-relay-apply').onclick = relayApply;
+  $('btn-relay-close').onclick = relayClose;
+  $('relay-include-run').onchange = relayGenerate;   /* 勾选变化即时重生成 */
+}
+
+/* ========================= 分享卡（离屏 canvas 战报合成） =========================
+   900×1200 竖版，风格沿用游戏配色（深紫底/金色标题/像素描边）。三种战绩：
+   投毒战绩（毒词×N/攻克数/胜负/日期）、远征成绩（积分/三枚章/日期）、
+   词魂肉鸽战绩（到达关卡/天赋/诅咒）。同一战绩复用同一画布与 dataURL。 */
+var ShareCard = {
+  W: 900, H: 1200,
+  cache: {},        /* key -> { canvas, dataURL, key } */
+  lastKey: '',
+  homeUrl: function () {
+    try { return location.origin + location.pathname; } catch (e) { return ''; }
+  },
+  dateStr: function (t) {
+    var d = t ? new Date(t) : new Date();
+    if (isNaN(d.getTime())) d = new Date();
+    return d.getFullYear() + '.' + (d.getMonth() + 1) + '.' + d.getDate();
+  },
+  /* ---- 数据构造 ---- */
+  fromPoisonLog: function (entry) {
+    var e = entry || {};
+    var words = e.words || [];
+    var pending = !!e.pending;
+    var title = e.role === 'set' ? '☠️ 毒池挑战 · 我布的毒' : '🗡️ 毒池挑战 · 我闯的毒';
+    var outcome = pending ? '等待好友回贴战报'
+      : (e.role === 'set' ? (e.win ? '毒计被破解' : '毒计成功！') : (e.win ? '通关成功！' : '未能通关'));
+    return {
+      kind: 'poison',
+      title: title,
+      outcome: outcome,
+      rows: [
+        ['毒词', '×' + (e.total || words.length || 0)],
+        ['攻克', (pending && e.cleared === undefined) ? '—' : ((e.cleared || 0) + '/' + (e.total || words.length || 0))],
+        ['战果', outcome],
+        ['日期', this.dateStr(e.t)]
+      ],
+      qrText: this.homeUrl(),
+      qrLabel: '扫码打开 · 单词大冒险'
+    };
+  },
+  fromExpedition: function (runData) {
+    var clearedStages = Math.min(3, (runData.stage - 1) + (runData.ended === 'done' ? 1 : 0));
+    var medals = [];
+    for (var i = 0; i < 3; i++) medals.push(i < clearedStages ? '🏆' : '·');
+    return {
+      kind: 'expedition',
+      title: '🚀 每日远征战报',
+      outcome: runData.ended === 'done' ? '远征告捷！' : '远征撤退',
+      rows: [
+        ['远征积分', String(runData.expScore || 0)],
+        ['击杀敌军', (runData.kills || 0) + ' / 19'],
+        ['最高连击', '×' + (runData.maxCombo || 0)],
+        ['三枚章', medals.join(' ')],
+        ['日期', this.dateStr(Date.now())]
+      ],
+      qrText: this.homeUrl(),
+      qrLabel: '扫码应战 · 全员同题'
+    };
+  },
+  fromRogue: function (runData) {
+    var rgt = (typeof rogueTalent === 'function') ? rogueTalent(runData.rogue && runData.rogue.talent) : null;
+    var curse = (runData.rogue && runData.rogue.curse && typeof BOSS_MODS !== 'undefined') ? BOSS_MODS[runData.rogue.curse] : null;
+    return {
+      kind: 'rogue',
+      title: '🎲 词魂肉鸽战报',
+      outcome: runData.ended === 'done' ? '👑 词魂加冕！' : '止步第 ' + (runData.stage || 1) + ' 关',
+      rows: [
+        ['到达关卡', '第 ' + (runData.stage || 1) + ' / 6 关'],
+        ['天赋', rgt ? (rgt.icon + ' ' + rgt.name) : '—'],
+        ['诅咒', curse ? (curse.icon + ' ' + curse.name) : '—'],
+        ['击杀', String(runData.kills || 0)],
+        ['日期', this.dateStr(Date.now())]
+      ],
+      qrText: this.homeUrl(),
+      qrLabel: '扫码挑战 · 词魂肉鸽'
+    };
+  },
+  fromPoisonRun: function (runData) {
+    var cleared = Object.keys(runData.poisonCleared || {}).length;
+    var total = (runData.poison && runData.poison.words.length) || 0;
+    var code = '';
+    try { code = buildResultCode() || ''; } catch (e) { code = ''; }
+    return {
+      kind: 'poison-run',
+      title: '☠️ 噩梦毒池战报',
+      outcome: runData.ended === 'done' ? '通关成功！' : '未能通关',
+      rows: [
+        ['毒词', '×' + total],
+        ['攻克', cleared + '/' + total],
+        ['战果', runData.ended === 'done' ? '通关成功！' : '未能通关'],
+        ['日期', this.dateStr(Date.now())]
+      ],
+      qrText: code || this.homeUrl(),
+      qrLabel: code ? '扫码得成绩码 · 粘贴回给出题者' : '扫码打开 · 单词大冒险'
+    };
+  },
+  /* ---- 绘制（复用：同 key 直接返回缓存） ---- */
+  ensure: function (data) {
+    var key = data.kind + '|' + JSON.stringify(data.rows) + '|' + data.qrText;
+    if (this.cache[key]) { this.lastKey = key; return this.cache[key]; }
+    var cv = this.cache[key] && this.cache[key].canvas ? this.cache[key].canvas : null;
+    if (!cv) cv = document.createElement('canvas');
+    this.draw(cv, data);
+    var item = { canvas: cv, dataURL: cv.toDataURL('image/png'), key: key };
+    /* 缓存上限：只保留最近 4 张（内存友好） */
+    var keys = Object.keys(this.cache);
+    if (keys.length >= 4) delete this.cache[keys[0]];
+    this.cache[key] = item;
+    this.lastKey = key;
+    return item;
+  },
+  draw: function (cv, data) {
+    var W = this.W, H = this.H;
+    cv.width = W; cv.height = H;
+    var c = cv.getContext('2d');
+    /* 底：游戏同款深紫渐变 */
+    var g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#2a2070');
+    g.addColorStop(0.55, '#1a1440');
+    g.addColorStop(1, '#0c0a20');
+    c.fillStyle = g;
+    c.fillRect(0, 0, W, H);
+    /* 像素网格 + 顶部光晕（像素感） */
+    c.strokeStyle = 'rgba(255,255,255,.035)';
+    c.lineWidth = 2;
+    for (var gx = 0; gx <= W; gx += 30) { c.beginPath(); c.moveTo(gx + .5, 0); c.lineTo(gx + .5, H); c.stroke(); }
+    for (var gy = 0; gy <= H; gy += 30) { c.beginPath(); c.moveTo(0, gy + .5); c.lineTo(W, gy + .5); c.stroke(); }
+    var glow = c.createRadialGradient(W / 2, 150, 30, W / 2, 150, 480);
+    glow.addColorStop(0, 'rgba(124,92,255,.5)');
+    glow.addColorStop(1, 'rgba(124,92,255,0)');
+    c.fillStyle = glow;
+    c.fillRect(0, 0, W, 700);
+    /* 角标：游戏名（左上） */
+    c.fillStyle = '#ffd166';
+    c.font = '900 34px "PingFang SC", "Microsoft YaHei", sans-serif';
+    c.textAlign = 'left';
+    c.fillText('⚔️ 单词大冒险', 56, 92);
+    /* 大字标题 */
+    c.textAlign = 'center';
+    c.fillStyle = '#f2efff';
+    c.font = '900 78px "PingFang SC", "Microsoft YaHei", sans-serif';
+    c.fillText(data.title, W / 2, 260);
+    /* 战果横条 */
+    c.font = '800 44px "PingFang SC", "Microsoft YaHei", sans-serif';
+    c.fillStyle = '#3ddc84';
+    c.fillText(data.outcome, W / 2, 340);
+    /* 数据块（像素质感卡片）：行高按行数自适应，底部给二维码留固定区 */
+    var qy = H - 430, qs = 280;                       /* 二维码白底区 */
+    var ry = 410, rowsBottom = qy - 40;
+    var n2 = data.rows.length;
+    var gap = n2 > 4 ? 12 : 18;
+    var rh = Math.floor((rowsBottom - ry - gap * (n2 - 1)) / n2);
+    if (rh > 92) rh = 92;
+    var labSize = rh >= 64 ? 38 : 30, valSize = rh >= 64 ? 42 : 34;
+    c.textAlign = 'left';
+    for (var i = 0; i < n2; i++) {
+      var y = ry + i * (rh + gap);
+      c.fillStyle = 'rgba(255,255,255,.07)';
+      this.pxRect(c, 90, y, W - 180, rh, 14);
+      c.fillStyle = '#a9a3d6';
+      c.font = '700 ' + labSize + 'px "PingFang SC", "Microsoft YaHei", sans-serif';
+      c.fillText(data.rows[i][0], 130, y + rh / 2 + labSize * 0.36);
+      c.textAlign = 'right';
+      c.fillStyle = '#ffd166';
+      c.font = '900 ' + valSize + 'px Consolas, "Courier New", monospace';
+      c.fillText(data.rows[i][1], W - 130, y + rh / 2 + valSize * 0.36);
+      c.textAlign = 'left';
+    }
+    /* 二维码（白底像素块） */
+    var qx = W / 2 - qs / 2;
+    c.fillStyle = '#fdfcff';
+    this.pxRect(c, qx - 14, qy - 14, qs + 28, qs + 28, 18);
+    try {
+      var qq = qrcode(0, 'M');
+      qq.addData(data.qrText, 'Byte');
+      qq.make();
+      var n = qq.getModuleCount();
+      var cell = Math.floor(qs / n);
+      var off = (qs - cell * n) / 2;
+      c.fillStyle = '#1a1440';
+      for (var r2 = 0; r2 < n; r2++) {
+        for (var c2 = 0; c2 < n; c2++) {
+          if (qq.isDark(r2, c2)) c.fillRect(qx + off + c2 * cell, qy + off + r2 * cell, cell, cell);
+        }
+      }
+    } catch (e) {   /* 二维码库缺失/内容超容：降级画占位框 */
+      c.strokeStyle = '#a9a3d6';
+      c.lineWidth = 4;
+      c.strokeRect(qx, qy, qs, qs);
+    }
+    c.textAlign = 'center';
+    c.fillStyle = '#a9a3d6';
+    c.font = '700 24px "PingFang SC", "Microsoft YaHei", sans-serif';
+    c.fillText(data.qrLabel, W / 2, qy + qs + 44);
+    /* 底部口号 */
+    c.fillStyle = 'rgba(169,163,214,.75)';
+    c.font = '700 24px "PingFang SC", "Microsoft YaHei", sans-serif';
+    c.fillText('打怪 · 闯关 · 记单词', W / 2, H - 52);
+  },
+  pxRect: function (c, x, y, w, h, r) {   /* 关掉平滑的圆角矩形，像素感 */
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+    c.fill();
+  },
+  /* ---- 分发：Web Share 优先（带图），不支持/失败自动降级到预览+下载 ---- */
+  share: function (data) {
+    var item;
+    try { item = this.ensure(data); }
+    catch (e) { toast('分享卡生成失败：' + (e && e.message)); return; }
+    var self = this;
+    var tryShare = function (file) {
+      try {
+        var ok = file && navigator.canShare && navigator.canShare({ files: [file] });
+        if (!ok) { self.preview(item); return; }
+        var settled = false;
+        /* 2s 竞速兜底：个别环境（无 UI 的 headless/受限 WebView）share() 永远挂起，
+           真机上系统分享面板毫秒级弹出，竞速永不触发 */
+        var race = setTimeout(function () {
+          if (!settled) { settled = true; self.preview(item); }
+        }, 2000);
+        navigator.share({ files: [file], title: '单词大冒险 · 战报', text: data.title }).then(function () {
+          if (!settled) { settled = true; clearTimeout(race); }
+        }, function (err) {
+          if (settled) return;
+          settled = true; clearTimeout(race);
+          /* 用户主动取消（AbortError）不打扰；环境拒绝/失败回落预览下载 */
+          if (err && err.name === 'AbortError') return;
+          self.preview(item);
+        });
+      } catch (e) { self.preview(item); }
+    };
+    if (!navigator.share) { this.preview(item); return; }
+    try {
+      if (item.canvas.toBlob) {
+        item.canvas.toBlob(function (blob) {
+          if (!blob) { self.preview(item); return; }
+          try { tryShare(new File([blob], 'word-quest-battle-card.png', { type: 'image/png' })); }
+          catch (x) { self.preview(item); }
+        }, 'image/png');
+        return;
+      }
+      this.preview(item);   /* toBlob 不可用：直接预览下载 */
+    } catch (e) { this.preview(item); }
+  },
+  preview: function (item) {
+    $('share-img').src = item.dataURL;
+    var dl = $('btn-share-download');
+    dl.onclick = function () {
+      var a = document.createElement('a');
+      a.href = item.dataURL;
+      a.download = 'word-quest-battle-card.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      toast('PNG 已开始下载');
+    };
+    $('share-overlay').hidden = false;
+  }
+};
+function bindShareOverlay() {
+  $('btn-share-close').onclick = function () { $('share-overlay').hidden = true; };
+}
+/* 结算页入口：按本局类型构造分享卡数据 */
+function openShareCardForResult() {
+  if (!run) return;
+  var data = null;
+  if (run.poison) data = ShareCard.fromPoisonRun(run);
+  else if (run.mode === 'expedition') data = ShareCard.fromExpedition(run);
+  else if (run.rogue) data = ShareCard.fromRogue(run);
+  if (!data) { toast('本局类型暂不支持分享卡'); return; }
+  ShareCard.share(data);
+}
+
 function init() {
   var wordsOk = !!buildEnc();
   makeDeco($('home-deco'), ['🌲', '✨', '🍄', '🦋', '🌟', '⛰️'], 10);
@@ -5750,6 +6826,8 @@ function init() {
   refreshHome();
   showScreen('scr-home');
   startWatchdog();
+  relayCheckHash();          /* 带接力码 hash 打开：收片/恢复流程（#r=i/n.<b64>） */
+  relayResumeAfterReload();  /* 恢复存档后若带有对局快照，询问续接（run 级接力第二层） */
   if (!wordsOk) showLoadFail();   /* 词库加载失败：给可恢复提示，而不是无声死页 */
   /* PWA：本地服务 / https 下注册离线缓存（双击 file:// 打开时自动跳过）。
      updateViaCache:'none'：SW 脚本的更新检查绕过 HTTP 缓存——否则 sw.js 自身被

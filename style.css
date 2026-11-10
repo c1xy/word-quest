@@ -1367,3 +1367,82 @@ a.btn { text-decoration: none; display: inline-block; }
   .duel-side { flex-direction: column; gap: 2px; padding: 8px 10px; text-align: center; }
   .ds-combo { min-width: 0; }
 }
+
+/* ============ 接力码 / 分享卡（跨设备搬档 & 战报出图） ============ */
+.relay-box { text-align: left; }
+.relay-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0; }
+.relay-cap { font-size: 11px; }
+.relay-run-opt {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--c-sub);
+  margin: 6px 0; cursor: pointer;
+}
+.relay-run-opt input { accent-color: var(--c-primary); }
+#relay-qr-wrap { text-align: center; }
+.relay-qr {
+  image-rendering: pixelated;
+  background: #fdfcff;
+  border-radius: 12px;
+  margin: 8px auto 4px;
+  display: block;
+  max-width: 100%;
+}
+.relay-pager {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+  margin: 4px 0 8px; font-size: 13px; font-weight: 800; color: var(--c-accent);
+}
+.relay-sep { border-top: 1px dashed rgba(255,255,255,.18); margin: 14px 0; }
+#relay-text, #relay-in-text, #relay-backup-text {
+  width: 100%; min-height: 64px;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 12px;
+  color: #cfe9ff; font-family: Consolas, monospace; font-size: 11px;
+  padding: 10px; margin: 8px 0;
+  resize: vertical; outline: none;
+}
+#relay-in-text { min-height: 88px; }
+#relay-backup-text { min-height: 56px; }
+.relay-backup {
+  background: rgba(61,220,132,.08);
+  border: 1px solid rgba(61,220,132,.35);
+  border-radius: 12px;
+  padding: 10px 12px; margin: 10px 0;
+}
+.relay-backup .io-log-title { color: var(--c-good); }
+.relay-warn {
+  font-size: 13px; line-height: 1.7; color: var(--c-text);
+  background: rgba(255,93,115,.1);
+  border: 1px solid rgba(255,93,115,.4);
+  border-radius: 12px;
+  padding: 10px 12px; margin: 8px 0 12px;
+  text-align: left;
+}
+.io-log-share {
+  min-width: 34px; padding: 4px 8px; flex-shrink: 0;
+}
+/* 分享卡预览 */
+.share-box { max-width: 360px; }
+.share-img {
+  width: 100%; max-width: 300px;
+  border-radius: 14px;
+  border: 2px solid rgba(255,255,255,.15);
+  margin: 12px auto; display: block;
+}
+.relay-close-row { margin-top: 12px; }
+@media (max-width: 480px) {
+  .relay-qr { width: 250px !important; height: 250px !important; }
+  .share-box { max-width: 320px; }
+}
+
+/* ============ 接力码/分享卡弹层高度自适应（全端，含桌面矮窗） ============
+   生成态内容高（QR+分片器+文本区+恢复区+按钮行）可达 1100px+，桌面 1280×800
+   与手机 390×844 都会越界；此前 .memcard-box 在手机内滚、桌面无任何规则，
+   关闭/「解析并恢复」按钮滚动流末尾不可达 → 用户被困弹层。统一改为
+   io 弹窗同款「容器自身滚动 + 盒高不设限」：按钮永远在滚动流末尾可达。 */
+#relay-overlay, #share-overlay {
+  align-items: flex-start;
+  overflow-y: auto;
+}
+#relay-overlay .memcard-box, #share-overlay .memcard-box { max-height: none; }
+#relay-overlay .memcard-box { margin: 12px auto; }
