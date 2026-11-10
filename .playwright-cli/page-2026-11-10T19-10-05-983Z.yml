@@ -1,0 +1,52 @@
+- generic [ref=e2]:
+  - generic [ref=e278]:
+    - generic:
+      - generic: 🌵
+      - generic: 🌵
+      - generic: 🐍
+      - generic: 🦴
+      - generic: 🐍
+      - generic: ☀️
+      - generic: 🦴
+      - generic: ☀️
+      - generic: ☀️
+    - generic [ref=e279]:
+      - button "🏳️ 退出" [ref=e280] [cursor=pointer]
+      - button "📲" [ref=e281] [cursor=pointer]
+      - generic [ref=e282]: 第 2 关
+      - generic [ref=e283]: 🪙 624
+      - generic [ref=e656]: 🔥 ×10
+    - generic [ref=e457]:
+      - generic [ref=e458]: 🏰
+      - generic [ref=e460]: 👹
+      - generic [ref=e461]: 城防 100%
+    - generic [ref=e286]:
+      - generic [ref=e287]:
+        - generic [ref=e288]: 毒蜘蛛 · Lv.1
+        - generic "⚡ 点击怪物：蓄力一击！" [ref=e302] [cursor=pointer]:
+          - generic [ref=e303]: 🕷️
+        - generic [ref=e309]: 🪶 v.
+        - generic [ref=e462]: 👹 ×10
+      - generic [ref=e290]: ⚡ VS ⚡
+      - generic [ref=e291]:
+        - generic [ref=e292]: 🏰
+        - generic [ref=e293]: 🏰 城防 100%
+    - generic [ref=e295]:
+      - generic [ref=e304]: 🇨🇳 选出对应的英文
+      - generic [ref=e296]: v. 表明；指出
+      - generic [ref=e464]:
+        - button "1 interfere":
+          - generic: "1"
+          - text: interfere
+        - button "2 increase":
+          - generic: "2"
+          - text: increase
+        - button "3 interrupt":
+          - generic: "3"
+          - text: interrupt
+        - button "4 indicate":
+          - generic: "4"
+          - text: indicate
+  - generic [ref=e299]:
+    - text: 第 2 关 · 荒芜沙漠
+    - generic [ref=e657]: 骆驼的骸骨指向绿洲的方向。

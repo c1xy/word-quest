@@ -1,0 +1,20 @@
+- generic [ref=e584]:
+  - heading "🤝 双人对决" [level=2] [ref=e585]
+  - generic [ref=e586]:
+    - paragraph [ref=e587]: 同一台设备轮流作答的面对面之战：🔥 红队与 ❄️ 蓝队各答 6 题（同一词库抽词、互不重复），每题 12 秒限时。得分 = 10 + 剩余秒数 + 连击 ×2；交接横幅会盖住题目防偷看，把手机递给对方再开始。作答照常写入掌握度与间隔重复——对决也是复习。
+    - generic [ref=e588]:
+      - generic [ref=e589]:
+        - generic [ref=e590]: 🔥
+        - generic [ref=e591]:
+          - text: 红队
+          - text: 先手
+      - generic [ref=e592]: VS
+      - generic [ref=e593]:
+        - generic [ref=e594]: ❄️
+        - generic [ref=e595]:
+          - text: 蓝队
+          - text: 后手
+    - paragraph [ref=e596]: 历史战绩：对战 0 场 · 🔥 红队胜 0 场 · ❄️ 蓝队胜 0 场
+  - generic [ref=e597]:
+    - button "⚔️ 开始对决" [ref=e598] [cursor=pointer]
+    - button "← 返回" [ref=e599] [cursor=pointer]

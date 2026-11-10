@@ -1,0 +1,72 @@
+- generic [ref=e2]:
+  - generic [ref=e278]:
+    - generic:
+      - generic: 💀
+      - generic: 💀
+      - generic: 🔥
+      - generic: 🌋
+      - generic: 🌋
+      - generic: 🪨
+      - generic: 🔥
+      - generic: 🔥
+      - generic: 🔥
+    - generic [ref=e279]:
+      - button "🏳️ 退出" [ref=e280] [cursor=pointer]
+      - button "📲" [ref=e281] [cursor=pointer]
+      - generic [ref=e282]: 第 4 关
+      - generic [ref=e283]: 🪙 1219
+      - generic [ref=e656]: 🔥 ×20
+    - generic [ref=e457]:
+      - generic [ref=e458]: 🏰
+      - generic [ref=e460]: 👹
+      - generic [ref=e461]: 城防 99%
+    - generic [ref=e286]:
+      - generic [ref=e287]:
+        - generic [ref=e288]: 小幽灵 · Lv.4
+        - generic "⚡ 点击怪物：蓄力一击！" [ref=e302] [cursor=pointer]:
+          - generic [ref=e303]: 👻
+        - generic [ref=e462]: 👹 ×10
+      - generic [ref=e290]: ⚡ VS ⚡
+      - generic [ref=e291]:
+        - generic [ref=e292]: 🏰
+        - generic [ref=e293]: 🏰 城防 99%
+    - generic [ref=e295]:
+      - generic [ref=e304]: 🇨🇳 选出对应的英文
+      - generic [ref=e296]: n. 账户；描述 v. 解释
+      - generic [ref=e464]:
+        - button "1 access" [ref=e812] [cursor=pointer]:
+          - generic [ref=e813]: "1"
+          - text: access
+        - button "2 accent" [ref=e814] [cursor=pointer]:
+          - generic [ref=e815]: "2"
+          - text: accent
+        - button "3 ability" [ref=e816] [cursor=pointer]:
+          - generic [ref=e817]: "3"
+          - text: ability
+        - button "4 account" [ref=e818] [cursor=pointer]:
+          - generic [ref=e819]: "4"
+          - text: account
+      - button "⚡ 蓄力一击" [ref=e473] [cursor=pointer]
+  - generic [ref=e821]:
+    - generic [ref=e822]: 📲 接力码 · 跨设备搬档
+    - generic [ref=e823]:
+      - generic [ref=e824]:
+        - button "📤 生成本机接力码" [active] [ref=e825] [cursor=pointer]
+        - generic [ref=e839]: 存档 7.0KB → 压缩后 2.2KB · 分 4 张码
+      - generic [ref=e826] [cursor=pointer]:
+        - checkbox "连同进行中的对局一起接力（关卡/词表/城防/金币/连击）" [checked] [ref=e827]
+        - text: 连同进行中的对局一起接力（关卡/词表/城防/金币/连击）
+      - generic [ref=e840]:
+        - generic [ref=e842]:
+          - button "◀" [ref=e843] [cursor=pointer]
+          - generic [ref=e844]: 第 1/4 片
+          - button "▶" [ref=e845] [cursor=pointer]
+        - paragraph [ref=e846]: 手机扫码即打开本游戏并自动恢复；多张码请按顺序逐张扫（恢复端自动集齐校验后合并）。也可以复制下方完整文本发给对方粘贴。
+      - textbox [ref=e828]: R1.V1EBA4h3q1YqU7Iy1FEqAZLmlibGxhYGhgbGhqY6SsWJZalKVtVKyfmZecVAWSNDSx2l0oL0osSUVCC_WimjQMnKAKgzMxeoDsgozshMzUkBM0F6gIxaHaXcxOKS1KJKiEF5ZalFxWBDcyC2FqemAtWZ6SjlZ4P55UX5eelKVkDbc4D6YE4yMzWzMDEy11FKKQVqhopZGkHEwFqCS4pSE4FGAK1OTQTZYKhnBLQ8My8ttSgzv4h0G01MLS0tgaqQbbQwhIjhsxHox5KifJA3MxNzMKw1QrcWyEK11tLC3MQExVpzAyNjsBgua81Nwfbm5maWlKRiBi6QgWonUCta4FpamKEGrrmhhQlYDLudRnoGIDtLihLzioEBDLMSlATAVhqjWwn0N7KV5sYGQBIojWwlTAzFSqBGmDdNTYChjwAWQAeAwxkoT4afzY3MLYCCqH42B4vh9TPQuyWZOZlVCF-TYqmJkYkFuqWWYDG8liamAOMWI5QJJSZzE1NzU1BGRrYPJoZiH1AjPDGhBDJSKJOTsMzNDU2BaQHFv5ZGYDG8_s3MAxYZwJDGtBOYDUB2Ar2OI2VZmBuYGaFmIAtjU4gYrgwEyurIAJKNQfbnJZPjbQsDA2P0aLY0BYvh9XZRKvbikQgbDU0sMALaDCxGKDVDimZS7TOyxCgxLM3BYnjtA5eL-UArSLfRxMQYrVwElsZgMbw2FhSlokUkPP9ALYXleMzC2BRImqLmH7gYzvwDsjQls7gkEZuV0CyLsBI9-ZoZAH2FVi7BxHAWjOCkU5IIqnFJts_E2NAI3T6oGD77knMy09JIrt7MLczMLExRrbMwMYCI4cqdoCKoKDWdnGRjbm5gbGqEGoMWxoYWYDH8JW5BAagWJ8dGYBWO2m4A2ggsSHG2G-CZPze_hCwLgfGFXuAZGRLOGcBGXUlRaTK8XiHFSnMLS9QCDmilEVgMr5XFqQWJRYnk-dIS2DhCt9IELIbXyvyCgvyiktK8zBLSyzlg9WUALFnRbQWVtgRsBbbGChLzyEuyhkZGpsCGNqqd5mAx_GV5flEuGa0SoIWgVgi6hRZgMQKeBBZxwNYueRFqaGpohp5PjA3AYgSSbUpmMplWmpmBujCoVhqCxfAXBsmFpZlYGiOEiztTS2MjdBstTMBieFvzSfn5uaR70MLMwNQczToTc1OwGP5KMrUoI7GA9GY00EZDCyO0tGNibgYWw2tjal5iUg4ZcWhhZmyA6UULsBj-oic5IxXUTSXdQmBJil5jmVuCxQjVIKmJZGRHC2B_zADdQgsDsBj-7FiUWk6OdRaG6Lkf2G4Ei-G1LiO1OLOErHxoYWYJ7IegW2kCFiNcqmLJhwRtBNYdxkao7WMLU1NDsBh-G0uLgG1HMqpIoA9NzdFi0RTY7ACJ4bUxKb-khJy8b2lsYWGIVp6amhqDxfBnjMTkosy0TDI6OkDCANj4QLcT2NkiFJFFqQU5ZFTHliaGxujVsampGViMQGlTRpZ1RqZmaI1HYGEKFsMfpMB8AewBZCaTUaICCQsj1JERoKUWYDECYwSphaVk5UdLE1MDS9TenAWoDAKJ4Q_WHGCRSlbuMDHDKFRNzQwJF6pFqTnAFmsieXaam6L1kYF2Ahtz-MsAcHRCJEADmKUgq-HVvFJ4aoqCX36ZgqGhgpGBkZkScEwsPyWx0hmizswclKFTQSqrgfFTBgyrUlDxBbQxNS8lJ7UYmD5AQ6TFqSUlmXnp4NRSDNQKHEIFtsxTgXFaWpJfkJMITLsQflI6sGRIS8wpBrIhzS4DPWDFV1hSWQAZkU02AopB1KYaJcPVFhek5gAHI6G8HGDaBAUZmAsq5DLygdnfPy-n0jcTOLhbkgq3H2gcNmGgM_zT0tBFgZaAQgnEAZecxcByzAdoFdBh0bGQEINxlZJTS0yUoIIu4J6kUh6w-QocMQVGUGImpHBIAfsQWxgnFmeDjKlWygTarpRaURCfnQn0IKi3nw-J-vR80OirISiN5ecBTYF6PTknEThYDdQE9TvUBODAS2ZqeTxYKaYhxJmRlF9cjMsZ-E2IBTcxM0BeTsssKi6JT8rJzwfKArUBa7ykfEMDIBvcSgMFXjWEBbQRaBGopAFHPMhiIMMYmLRADgGlBtAgACje_SFpGhLrUE5RKWhEH1RdgALbBew4oHBuYoUzyEZg2gfygK3CtNRkkPkgTmJyNlxdTmKSH4wBNREYCeHgaQIktb6JwAmCalAWAsqmpmSWQDtE0IgFuh-SOUDzBTnAxpILVBw0a5CfUhwMztjVSuWJRZDQSC9KBYUaOCxyEsFyJYlF6aDAMATlI5CgCyi34Ek7kIgAzVrkl4DiBjxXkVuQkwpSD8sR4FDxAcVhtRJIn66hIRCBczEoVwO1AEciTUAeA40TloKH7ICcCqB3LUATCcBxPKDRwO4B0Apgpg8AhSHQ_RAeNA5BXVIEyzc_BeTePEgKBImA8gpQBJxToCWUUz6oiEOdRwGGAtBGpDErQwMzUxO0qQ90RcbGRgaGIEUYsxWQkhRpPgI8YIsxjoauDDwqZoY2JQDpIaEP-qMP72KosrQ0NQLFJnzQG80yyBA2yDLkYTZ0YyCDZigjYxhKwONcyINZ6DaZmRlbmqH1ANHVWBgCJ0oMwfUEsEAHpvBg4OQApOgpyM8szs8DpyNQCQjhehYXl4JScV5pTg7QdfnpoPqoGpojQfUfLBeB8oZzBtjtoERaCoxwWJYA2Qasx8AxBqofoNnOEK63wAjKBKkEGg1SCMxSoCSGqIdAAZiW5p0KzDCI0hdUTHimoBTSwEBOB-oENrJApUxqimdeMEQEVMKAWAgfg8oeqCS0rAOJABM3JLsDExHQ96BwhJVtkJIGtdyBlWXQacRi18SiPFCIWZgCcx4weZUDUw6QC5orSs4Hts9BQ1ggxZDpR0gAZADTGIQFlAe3UaIRLSREywW5RQH0KTQ2IFEDKsU8wQ6vrQUA
+      - button "📋 复制全部文本" [ref=e830] [cursor=pointer]
+    - generic [ref=e832]:
+      - 'textbox "粘贴好友发来的接力码文本，或含 #r= 的链接… 多片二维码请按顺序逐张扫：每扫一张打开的页面会自动收下该片并提示进度。" [ref=e833]':
+        - /placeholder: "粘贴好友发来的接力码文本，或含 #r= 的链接…\n多片二维码请按顺序逐张扫：每扫一张打开的页面会自动收下该片并提示进度。"
+      - button "📥 解析并恢复" [ref=e835] [cursor=pointer]
+      - paragraph [ref=e836]: 接力=复制不是移动：发送设备存档原样保留，两台设备各自独立继续。恢复前会先自动备份本机存档。
+    - button "关闭" [ref=e838] [cursor=pointer]

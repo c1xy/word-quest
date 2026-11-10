@@ -1,0 +1,45 @@
+- generic [ref=e278]:
+  - generic:
+    - generic: ✨
+    - generic: 🍂
+    - generic: 🌲
+    - generic: 🍂
+    - generic: 🌲
+    - generic: 🌲
+    - generic: ✨
+    - generic: 🍄
+    - generic: 🍄
+  - generic [ref=e279]:
+    - button "🏳️ 退出" [ref=e280] [cursor=pointer]
+    - button "📲" [ref=e281] [cursor=pointer]
+    - generic [ref=e282]: 🎧 听写 0/6
+    - generic [ref=e283]: 🪙 362
+  - generic [ref=e286]:
+    - generic [ref=e287]:
+      - generic [ref=e288]: 僵尸 · Lv.1
+      - generic "⚡ 点击怪物：蓄力一击！" [ref=e302] [cursor=pointer]:
+        - generic [ref=e303]: 🧟
+      - generic [ref=e309]: 🪶 v. · mit(送)
+    - generic [ref=e290]: ⚡ VS ⚡
+    - generic [ref=e291]:
+      - generic [ref=e292]: 🎧
+      - generic [ref=e293]: 🎧 听写挑战 · 不扣血
+  - generic [ref=e295]:
+    - generic [ref=e304]: 🎧 听音拼写 · 无语音包，首字母提示
+    - generic [ref=e296]: v. 承认；准许进入 （首字母：A…）
+    - generic [ref=e324]:
+      - generic [ref=e325]:
+        - generic [ref=e384]: a
+        - generic [ref=e385]: d
+        - generic [ref=e386]: m
+      - generic [ref=e334]:
+        - button "t" [ref=e389] [cursor=pointer]
+        - button "d"
+        - button "i" [ref=e391] [cursor=pointer]
+        - button "a"
+        - button "m" [active]
+      - generic [ref=e343]:
+        - button "💡 提示" [disabled] [ref=e344]
+        - button "⌫ 退格" [ref=e345] [cursor=pointer]
+        - button "✅ 提交" [disabled] [ref=e346]
+    - button "🔍 记忆提示" [ref=e308] [cursor=pointer]

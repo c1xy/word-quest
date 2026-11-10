@@ -1,0 +1,22 @@
+- generic [ref=e368]:
+  - heading "🎲 词魂肉鸽" [level=2] [ref=e369]
+  - generic [ref=e380]:
+    - heading "💀 第二步 · 抽签必选一条全局诅咒" [level=3] [ref=e396]
+    - generic [ref=e382]:
+      - generic [ref=e397] [cursor=pointer]:
+        - generic [ref=e398]: 🪨
+        - generic [ref=e399]: 石肤
+        - generic [ref=e400]: 整局每只怪物都带 1 层石肤护盾
+        - generic [ref=e401]: 🎁 开局 +2 提示卡
+      - generic [ref=e402] [cursor=pointer]:
+        - generic [ref=e403]: 🌵
+        - generic [ref=e404]: 荆棘
+        - generic [ref=e405]: 整局答错额外压境 +2%
+        - generic [ref=e406]: 🎁 开局 +1 护盾
+      - generic [ref=e407] [cursor=pointer]:
+        - generic [ref=e408]: 💰
+        - generic [ref=e409]: 贪婪
+        - generic [ref=e410]: 整局金币 +50%，但每答 1 题压境 +2%
+        - generic [ref=e411]: 🎁 贪婪本身就是补偿
+    - paragraph [ref=e395]: 诅咒无法拒绝，但每条都自带开局补偿——点击接受命运
+  - button "← 返回" [ref=e379] [cursor=pointer]

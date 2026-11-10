@@ -1,0 +1,19 @@
+- generic [ref=e368]:
+  - heading "🎲 词魂肉鸽" [level=2] [ref=e369]
+  - generic [ref=e380]:
+    - heading "🧬 第一步 · 三选一词魂天赋" [level=3] [ref=e381]
+    - generic [ref=e382]:
+      - generic [ref=e383] [cursor=pointer]:
+        - generic [ref=e384]: 🛡️
+        - generic [ref=e385]: 复仇骑士
+        - generic [ref=e386]: 复仇怪倒戈成友军：现身时压境 -10%，其答错不伤城防；复仇词答对金币 ×2
+      - generic [ref=e387] [cursor=pointer]:
+        - generic [ref=e388]: 🧙
+        - generic [ref=e389]: 词根法师
+        - generic [ref=e390]: 同词根连锁：本题与上一题共用词根时答对 +8🪙 并累积连锁；每击杀一只怪，下一只怪入场 -1 血（溅射）
+      - generic [ref=e391] [cursor=pointer]:
+        - generic [ref=e392]: 🏹
+        - generic [ref=e393]: 听音游侠
+        - generic [ref=e394]: 全场只出听音/拼写题（无英文语音时自动全拼写），答对金币 ×2
+    - paragraph [ref=e395]: 点击一张卡片锁定天赋（决定你这一局的玩法形态）
+  - button "← 返回" [ref=e379] [cursor=pointer]

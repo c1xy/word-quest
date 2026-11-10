@@ -1,0 +1,12 @@
+- generic [ref=e368]:
+  - heading "🎲 词魂肉鸽" [level=2] [ref=e369]
+  - generic [ref=e370]:
+    - paragraph [ref=e371]: 一局制肉鸽挑战：开局三选一天赋，再从牌堆必选一条全局诅咒——BOSS 词缀放大成整局规则，自带补偿，高风险高回报。共 6 关：怪量逐关递增，第 6 关决战 BOSS，通关「👑 词魂加冕」，城破即终。作答照常写入掌握度与间隔重复。
+    - generic [ref=e372]:
+      - generic [ref=e373]: 🎲 出征 0
+      - generic [ref=e374]: 👑 加冕 0
+      - generic [ref=e375]: 📜 诅咒图鉴 0/14
+      - generic [ref=e376]: 🔗 最高连锁 0
+  - generic [ref=e377]:
+    - button "🎲 开启征途" [ref=e378] [cursor=pointer]
+    - button "← 返回" [ref=e379] [cursor=pointer]

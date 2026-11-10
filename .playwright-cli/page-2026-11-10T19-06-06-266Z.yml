@@ -1,0 +1,34 @@
+- generic [ref=e2]:
+  - generic [ref=e278]:
+    - generic:
+      - generic: 🍂
+      - generic: 🍄
+      - generic: 🌲
+      - generic: ✨
+      - generic: 🌲
+      - generic: 🌲
+      - generic: 🍄
+      - generic: ✨
+      - generic: 🌲
+    - generic [ref=e279]:
+      - button "🏳️ 退出" [ref=e280] [cursor=pointer]
+      - button "📲" [ref=e281] [cursor=pointer]
+      - generic [ref=e282]: 第 1 关
+      - generic [ref=e283]: 🪙 362
+    - generic [ref=e457]:
+      - generic [ref=e458]: 🏰
+      - generic [ref=e460]: 👹
+      - generic [ref=e461]: 城防 100%
+    - generic [ref=e286]:
+      - generic [ref=e287]:
+        - generic "⚡ 点击怪物：蓄力一击！"
+        - generic [ref=e462]: 👹 ×10
+      - generic [ref=e290]: ⚡ VS ⚡
+      - generic [ref=e291]:
+        - generic [ref=e292]: 🏰
+        - generic [ref=e293]: 🏰 城防 100%
+  - generic [ref=e299]:
+    - text: 第 1 关 · 迷雾森林
+    - generic [ref=e463]:
+      - text: 苔藓石碑上刻着古老的词汇咒文。
+      - text: 敌军已兵临城下，快速答对击退他们！

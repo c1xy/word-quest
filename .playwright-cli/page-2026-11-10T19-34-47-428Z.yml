@@ -1,0 +1,16 @@
+- generic [ref=e584]:
+  - heading "🤝 双人对决" [level=2] [ref=e585]
+  - generic [ref=e600]:
+    - generic [ref=e601]:
+      - generic [ref=e602]:
+        - generic [ref=e603]: 🔥 红队
+        - generic [ref=e604]: "0"
+      - generic [ref=e605]:
+        - generic [ref=e606]: ❄️ 蓝队
+        - generic [ref=e607]: "0"
+    - generic [ref=e610]:
+      - generic [ref=e611]: 🔥
+      - generic [ref=e612]: 轮到 红队
+      - generic [ref=e613]: 第 1/6 题 · 全场 12 问 · 每题 12 秒
+      - button "🎯 我准备好了" [ref=e614] [cursor=pointer]
+  - button "← 返回" [ref=e599] [cursor=pointer]

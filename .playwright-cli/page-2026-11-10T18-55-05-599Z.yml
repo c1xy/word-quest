@@ -1,0 +1,86 @@
+- generic [ref=e2]:
+  - generic [ref=e73]:
+    - heading "🌌 词境工坊" [level=2] [ref=e74]
+    - paragraph [ref=e75]: 三步造一个专属词境：选词源 → 挂词缀 → 调参数。生成「词境码」发给好友（或留着自己重玩），开战照常写回学习进度。
+    - heading "① 选词源（勾选或粘贴，至少 4 词，上限 30 词）" [level=3] [ref=e76]
+    - generic [ref=e77]:
+      - generic [ref=e78] [cursor=pointer]:
+        - checkbox "🧩 词根家族 120 词" [ref=e79]
+        - generic [ref=e80]:
+          - generic [ref=e81]: 🧩 词根家族
+          - generic [ref=e82]: 120 词
+      - generic [ref=e83] [cursor=pointer]:
+        - checkbox "🔀 易混淆对 60 词" [checked] [ref=e84]
+        - generic [ref=e85]:
+          - generic [ref=e86]: 🔀 易混淆对
+          - generic [ref=e87]: 60 词
+      - generic [ref=e88] [cursor=pointer]:
+        - checkbox "⚡ 高频核心 500 500 词" [ref=e89]
+        - generic [ref=e90]:
+          - generic [ref=e91]: ⚡ 高频核心 500
+          - generic [ref=e92]: 500 词
+      - generic [ref=e93] [cursor=pointer]:
+        - checkbox "🎓 学术词族 150 词" [ref=e94]
+        - generic [ref=e95]:
+          - generic [ref=e96]: 🎓 学术词族
+          - generic [ref=e97]: 150 词
+      - generic [ref=e98] [cursor=pointer]:
+        - checkbox "📕 错题本（4 词） 4 词" [ref=e99]
+        - generic [ref=e100]:
+          - generic [ref=e101]: 📕 错题本（4 词）
+          - generic [ref=e102]: 4 词
+    - textbox "粘贴自定义词表（每行一个单词，可带释义；必须在内置 2909 词词典内，超出 30 词只取前 30） 例如： abandon v. 放弃 absorb" [ref=e103]:
+      - /placeholder: "粘贴自定义词表（每行一个单词，可带释义；必须在内置 2909 词词典内，超出 30 词只取前 30）\n例如：\nabandon v. 放弃\nabsorb"
+    - paragraph [ref=e104]: 当前词表 30 词（来源勾选 1 项）：band, bend, bind, bald, bare, fare, belt, bolt, melt, tend …
+    - heading "② 选词缀（BOSS 词缀池，最多 2 条）" [level=3] [ref=e105]
+    - generic [ref=e106]:
+      - button "⏱️ 时间压缩" [ref=e107] [cursor=pointer]
+      - button "💢 狂暴" [ref=e108] [cursor=pointer]
+      - button "🌵 荆棘" [ref=e109] [cursor=pointer]
+      - button "🧲 汲取" [ref=e110] [cursor=pointer]
+      - button "🥶 时停" [ref=e111] [cursor=pointer]
+      - button "💰 贪婪" [ref=e112] [cursor=pointer]
+      - button "🪨 石肤" [ref=e113] [cursor=pointer]
+      - button "🔕 沉默" [ref=e114] [cursor=pointer]
+      - button "🌊 狂潮" [ref=e115] [cursor=pointer]
+      - button "🧟 不死" [ref=e116] [cursor=pointer]
+      - button "🥀 贫瘠" [ref=e117] [cursor=pointer]
+      - button "🎭 诅咒" [ref=e118] [cursor=pointer]
+      - button "🌫️ 迷雾" [ref=e119] [cursor=pointer]
+      - button "🔮 妖印" [ref=e120] [cursor=pointer]
+    - paragraph [ref=e121]: 已选 0/2 条词缀
+    - heading "③ 调参数" [level=3] [ref=e122]
+    - generic [ref=e123]:
+      - generic [ref=e124]: 🏰 城防血量
+      - slider [ref=e125]: "1"
+      - generic [ref=e126]: ×1.0
+    - generic [ref=e127]:
+      - generic [ref=e128]: 👾 怪物血量
+      - slider [ref=e129]: "1"
+      - generic [ref=e130]: ×1.0
+    - generic [ref=e131]:
+      - generic [ref=e132]: ⏱ 每题时限
+      - slider [ref=e133]: "1"
+      - generic [ref=e134]: ×1.0
+    - textbox "开场引言（可选，≤50 字，进入词境时横幅展示）" [ref=e135]
+    - text: 0/50
+    - generic [ref=e136]:
+      - button "💾 保存到我的词境" [active] [ref=e137] [cursor=pointer]
+      - button "📤 生成词境码" [ref=e138] [cursor=pointer]
+      - button "⚔️ 直接开战" [ref=e139] [cursor=pointer]
+      - button "← 返回" [ref=e140] [cursor=pointer]
+    - generic [ref=e142]:
+      - heading "📥 粘贴词境码开战" [level=3] [ref=e143]
+      - 'textbox "粘贴好友发来的词境码（RM. 开头的完整文本，或含 #m= 的链接）…" [ref=e144]'
+      - button "📥 解析词境码" [ref=e146] [cursor=pointer]
+    - heading "🗂️ 我的词境" [level=3] [ref=e147]
+    - generic [ref=e150]:
+      - generic [ref=e151]:
+        - text: "🌌 词境 #12026/11/11"
+        - generic [ref=e152]: 📚 词量 30 · ⚠️ 无词缀 · 🏰 城防×1 👾 怪血×1 ⏱ 时限×1
+      - generic [ref=e153]:
+        - button "▶ 重玩" [ref=e154] [cursor=pointer]
+        - button "📤 分享" [ref=e155] [cursor=pointer]
+        - button "🗑️" [ref=e156] [cursor=pointer]
+  - generic:
+    - generic: 💾 词境已保存到「我的词境」

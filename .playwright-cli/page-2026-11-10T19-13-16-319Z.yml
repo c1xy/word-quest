@@ -1,0 +1,53 @@
+- generic [ref=e2]:
+  - generic [ref=e278]:
+    - generic:
+      - generic: 💀
+      - generic: 💀
+      - generic: 🔥
+      - generic: 🌋
+      - generic: 🌋
+      - generic: 🪨
+      - generic: 🔥
+      - generic: 🔥
+      - generic: 🔥
+    - generic [ref=e279]:
+      - button "🏳️ 退出" [ref=e280] [cursor=pointer]
+      - button "📲" [ref=e281] [cursor=pointer]
+      - generic [ref=e282]: 第 4 关
+      - generic [ref=e283]: 🪙 1219
+      - generic [ref=e656]: 🔥 ×20
+    - generic [ref=e457]:
+      - generic [ref=e458]: 🏰
+      - generic [ref=e460]: 👹
+      - generic [ref=e461]: 城防 100%
+    - generic [ref=e286]:
+      - generic [ref=e287]:
+        - generic [ref=e288]: 吸血鬼 · Lv.3
+        - generic "⚡ 点击怪物：蓄力一击！" [ref=e302] [cursor=pointer]:
+          - generic [ref=e303]: 🧛
+        - generic [ref=e309]: 🪶 adj. · luc(光)
+        - generic [ref=e462]: 👹 ×10
+      - generic [ref=e290]: ⚡ VS ⚡
+      - generic [ref=e291]:
+        - generic [ref=e292]: 🏰
+        - generic [ref=e293]: 🏰 城防 100%
+    - generic [ref=e295]:
+      - generic [ref=e304]: 🇨🇳 选出对应的英文
+      - generic [ref=e296]: adj. 不情愿的
+      - generic [ref=e464]:
+        - button "1 remote":
+          - generic: "1"
+          - text: remote
+        - button "2 remember":
+          - generic: "2"
+          - text: remember
+        - button "3 resource":
+          - generic: "3"
+          - text: resource
+        - button "4 reluctant":
+          - generic: "4"
+          - text: reluctant
+      - button "🔍 记忆提示" [ref=e308] [cursor=pointer]
+  - generic [ref=e299]:
+    - text: 第 4 关 · 熔岩火山
+    - generic [ref=e811]: 灰烬漫天，小心脚下！

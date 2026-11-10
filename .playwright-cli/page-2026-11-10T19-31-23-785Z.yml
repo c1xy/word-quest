@@ -1,0 +1,40 @@
+- generic [ref=e2]:
+  - generic [ref=e65]:
+    - heading "☠️ 噩梦通关！" [level=2] [ref=e318]
+    - generic [ref=e67]:
+      - generic [ref=e319]: ☠️ 毒词攻克 3/3
+      - generic [ref=e320]: ✏️ 答题 12 题
+      - generic [ref=e321]: 🎯 正确率 100%
+      - generic [ref=e322]: 🔥 最高连击 12
+      - generic [ref=e323]: 🪙 获得 222
+      - generic [ref=e324]: 📅 连续打卡 1 天
+    - heading "📜 本局单词回顾" [level=3] [ref=e76]
+    - generic [ref=e77]:
+      - generic [ref=e325]:
+        - generic [ref=e326]: ✅
+        - generic [ref=e327]: attempt
+        - generic [ref=e328]: v. 尝试 n. 尝试
+        - generic [ref=e329]: ★★★★★
+      - generic [ref=e330]:
+        - generic [ref=e331]: ✅
+        - generic [ref=e332]: attend
+        - generic [ref=e333]: v. 出席；参加
+        - generic [ref=e334]: ★★★☆☆
+      - generic [ref=e335]:
+        - generic [ref=e336]: ✅
+        - generic [ref=e337]: attach
+        - generic [ref=e338]: v. 附上；依恋
+        - generic [ref=e339]: ★★★☆☆
+    - generic [ref=e83]:
+      - button "⚔️ 投毒" [ref=e84] [cursor=pointer]
+      - button "📨 复制成绩码" [ref=e340] [cursor=pointer]
+      - button "🖼 分享卡" [ref=e341] [cursor=pointer]
+      - button "🔄 再来一局" [ref=e85] [cursor=pointer]
+      - button "🏠 回主页" [ref=e86] [cursor=pointer]
+  - generic [ref=e277]:
+    - generic [ref=e278]: 📨 成绩码（复制回贴给出题者）
+    - textbox [active] [ref=e349]: Rz71b1c1aQae
+    - generic [ref=e280]:
+      - button "📋 复制" [ref=e281] [cursor=pointer]
+      - button "关闭" [ref=e350] [cursor=pointer]
+      - button "取消" [ref=e283] [cursor=pointer]

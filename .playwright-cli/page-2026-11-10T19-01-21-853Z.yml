@@ -1,0 +1,35 @@
+- generic [ref=e278]:
+  - generic:
+    - generic: ✨
+    - generic: 🍂
+    - generic: 🌲
+    - generic: 🍂
+    - generic: 🌲
+    - generic: 🌲
+    - generic: ✨
+    - generic: 🍄
+    - generic: 🍄
+  - generic [ref=e279]:
+    - button "🏳️ 退出" [ref=e280] [cursor=pointer]
+    - button "📲" [ref=e281] [cursor=pointer]
+    - generic [ref=e282]: 🎧 听写 0/6
+    - generic [ref=e283]: 🪙 362
+  - generic [ref=e286]:
+    - generic [ref=e287]:
+      - generic [ref=e288]: 僵尸 · Lv.1
+      - generic "⚡ 点击怪物：蓄力一击！" [ref=e302] [cursor=pointer]:
+        - generic [ref=e303]: 🧟
+      - generic [ref=e309]: 🪶 v. · fer(带来)
+    - generic [ref=e290]: ⚡ VS ⚡
+    - generic [ref=e291]:
+      - generic [ref=e292]: 🎧
+      - generic [ref=e293]: 🎧 听写挑战 · 不扣血
+  - generic [ref=e295]:
+    - generic [ref=e304]: 🎤 跟读：大声说出这个单词
+    - generic [ref=e296]: transfer
+    - generic [ref=e305]:
+      - button "🎤 按住说话" [ref=e306] [cursor=pointer]
+      - generic [ref=e307]: 看词面，按住麦克风大声读出来！
+    - button "🔍 记忆提示" [ref=e308] [cursor=pointer]
+  - generic:
+    - generic: 敌军压境 +13%

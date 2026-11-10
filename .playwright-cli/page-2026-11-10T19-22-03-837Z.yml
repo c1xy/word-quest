@@ -1,0 +1,41 @@
+- generic [ref=e73]:
+  - heading "⚙️ 设置" [level=2] [ref=e74]
+  - generic [ref=e75] [cursor=pointer]:
+    - generic [ref=e76]: 🔔 音效
+    - checkbox "🔔 音效" [checked] [ref=e77]
+  - generic [ref=e78] [cursor=pointer]:
+    - generic [ref=e79]: 🔊 自动发音（答题后读一遍单词）
+    - checkbox "🔊 自动发音（答题后读一遍单词）" [checked] [ref=e80]
+  - generic [ref=e81] [cursor=pointer]:
+    - generic [ref=e82]: 🎵 背景音乐
+    - checkbox "🎵 背景音乐" [ref=e83]
+  - generic [ref=e84] [cursor=pointer]:
+    - generic [ref=e85]: 🎬 语速 0.9
+    - slider "🎬 语速 0.9" [ref=e86]: "0.9"
+  - generic [ref=e87] [cursor=pointer]:
+    - generic [ref=e88]: 🌱 每日新词目标 10 个
+    - combobox "🌱 每日新词目标 10 个" [ref=e89]:
+      - option "5"
+      - option "10" [selected]
+      - option "15"
+      - option "20"
+  - heading "🎮 题型开关" [level=3] [ref=e90]
+  - generic [ref=e91] [cursor=pointer]:
+    - generic [ref=e92]: 🇨🇳 看中文 → 选英文
+    - checkbox "🇨🇳 看中文 → 选英文" [checked] [ref=e93]
+  - generic [ref=e94] [cursor=pointer]:
+    - generic [ref=e95]: 🇬🇧 看英文 → 选中文
+    - checkbox "🇬🇧 看英文 → 选中文" [ref=e96]
+  - generic [ref=e97] [cursor=pointer]:
+    - generic [ref=e98]: 🔤 拼写题（拼出单词）
+    - checkbox "🔤 拼写题（拼出单词）" [ref=e99]
+  - generic [ref=e100] [cursor=pointer]:
+    - generic [ref=e101]: 👂 听音题（听发音选词）（当前浏览器暂无英文语音，听音题不可用）
+    - checkbox "👂 听音题（听发音选词）（当前浏览器暂无英文语音，听音题不可用）" [disabled] [ref=e102]
+  - generic [ref=e103]:
+    - button "☠️ 挑战码" [ref=e104] [cursor=pointer]
+    - button "📲 接力码" [ref=e105] [cursor=pointer]
+    - button "📤 导出存档" [ref=e106] [cursor=pointer]
+    - button "📥 导入存档" [ref=e107] [cursor=pointer]
+    - button "🗑️ 重置全部进度" [ref=e108] [cursor=pointer]
+    - button "← 返回" [ref=e109] [cursor=pointer]

@@ -1,0 +1,27 @@
+- generic [ref=e584]:
+  - heading "🤝 双人对决" [level=2] [ref=e585]
+  - generic [ref=e600]:
+    - generic [ref=e601]:
+      - generic [ref=e602]:
+        - generic [ref=e603]: 🔥 红队
+        - generic [ref=e604]: "0"
+      - generic [ref=e605]:
+        - generic [ref=e606]: ❄️ 蓝队
+        - generic [ref=e607]: "0"
+    - generic [ref=e615]:
+      - generic [ref=e616]: 🔥 红队 · 第 1/12 问 · 看中文选英文
+      - generic [ref=e617]: n. 折扣
+      - generic [ref=e618]:
+        - button "1 drug" [ref=e619] [cursor=pointer]:
+          - generic [ref=e620]: "1"
+          - text: drug
+        - button "2 discount" [ref=e621] [cursor=pointer]:
+          - generic [ref=e622]: "2"
+          - text: discount
+        - button "3 distance" [ref=e623] [cursor=pointer]:
+          - generic [ref=e624]: "3"
+          - text: distance
+        - button "4 district" [ref=e625] [cursor=pointer]:
+          - generic [ref=e626]: "4"
+          - text: district
+  - button "← 返回" [ref=e599] [cursor=pointer]
