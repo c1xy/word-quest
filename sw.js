@@ -1,6 +1,6 @@
 /* 单词大冒险 · Service Worker（网络优先，离线回落缓存） */
 'use strict';
-var CACHE = 'wq-cache-v18';
+var CACHE = 'wq-cache-v21';
 
 /* ── 发布更新清单（缺一不可，否则回访用户首次刷新可能新旧混版）──────────
    1) bump 上面的 CACHE 版本号（v15 → v16 …）：旧 SW 缓存整体作废重建；
@@ -12,7 +12,7 @@ var CACHE = 'wq-cache-v18';
 self.addEventListener('install', function (e) {
   e.waitUntil(
     caches.open(CACHE).then(function (c) {
-      var urls = ['./', './index.html', './style.css', './words.js', './game.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
+      var urls = ['./', './index.html', './style.css', './words.js', './game.js', './libs/qrcode.min.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
       /* 预缓存逐项容错：单项 404/瞬断只跳过该项（离线回落兜底），不再 all-or-nothing
          阻断 install —— 否则新 SW 永不 skipWaiting/接管，版本更新静默停摆。
          预缓存也强制再验证：install 里发起的 fetch 不经过本 SW 的 fetch 处理器，

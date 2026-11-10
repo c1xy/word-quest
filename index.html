@@ -27,7 +27,7 @@
   });
 })();
 </script>
-<link rel="stylesheet" href="style.css?v=20261107c">
+<link rel="stylesheet" href="style.css?v=20261108c">
 </head>
 <body>
 <div id="app">
@@ -75,6 +75,9 @@
         </button>
         <button class="btn btn-big" id="btn-review">
           📖 复习模式<small>专攻还没记住的词</small>
+        </button>
+        <button class="btn btn-big" id="btn-dict">
+          🎧 听写挑战<small>全听音拼写 · 无语音降级首字母</small>
         </button>
         <button class="btn btn-big" id="btn-match">
           🃏 记忆配对<small>翻牌配对单词和释义</small>
@@ -148,6 +151,7 @@
 
     <header class="battle-top">
       <button class="btn btn-tiny" id="btn-quit">🏳️ 退出</button>
+      <button class="btn btn-tiny" id="btn-battle-relay" title="📲 接力码：把当前对局和存档搬到另一台设备（计时自动暂停）">📲</button>
       <span class="top-info" id="battle-stage">第 1 关</span>
       <span class="top-info">🪙 <b id="battle-coins">0</b></span>
       <span class="top-info combo" id="battle-combo"></span>
@@ -260,6 +264,7 @@
         <button class="btn btn-primary" id="btn-retry-wrong" hidden>🔁 再战错词</button>
         <button class="btn" id="btn-poison-export">⚔️ 投毒</button>
         <button class="btn btn-primary" id="btn-result-code" hidden>📨 复制成绩码</button>
+        <button class="btn" id="btn-share-card" hidden>🖼 分享卡</button>
         <button class="btn" id="btn-again">🔄 再来一局</button>
         <button class="btn" id="btn-result-home">🏠 回主页</button>
       </div>
@@ -500,6 +505,7 @@
 
       <div class="setup-actions">
         <button class="btn btn-small" id="btn-poison-set">☠️ 挑战码</button>
+        <button class="btn btn-small btn-primary" id="btn-relay-set">📲 接力码</button>
         <button class="btn btn-small" id="btn-export">📤 导出存档</button>
         <button class="btn btn-small" id="btn-import">📥 导入存档</button>
         <button class="btn btn-small danger" id="btn-reset">🗑️ 重置全部进度</button>
@@ -522,6 +528,9 @@
         <p><b>📖 复习模式</b>不扣血、没压力，专门刷低掌握度和易错的词，适合考前突击。</p>
         <p><b>☠️ 投毒挑战码</b>结算页点「⚔️ 投毒」，把本场的复仇怪物（答错 2 次的词）、你的易混淆词对和 1 条随机 BOSS 词缀压成一个 12-18 位挑战码，发给好友。好友在主页/设置点「☠️ 挑战码」粘贴应战，进入噩梦毒池：<b>出题者对该词掌握度越低，怪物越硬</b>，干扰项还会优先出现你布下的混淆词。打完生成「📨 成绩码」回贴给出题者，双方本地都会记下战绩（谁毒倒了谁）——全程不需要联网。</p>
         <p><b>⚠️ BOSS 词缀</b>冒险每 5 关的 BOSS、每日远征的精英/BOSS 关和毒池挑战都会随机携带词缀（共 14 条）：⏱️ 时间压缩、💢 狂暴、🌵 荆棘、🧲 汲取，以及更凶的 🥶 时停（偷走 4 秒）、💰 贪婪（金币 +50% 但敌军持续推进）、🪨 石肤（护盾挡一次伤害）、🔕 沉默（封印记忆提示与提示卡）、🌊 狂潮（攻势每题 +1%）、🧟 不死（击倒后爬起来再战）、🥀 贫瘠（金币收益减半）、🎭 诅咒（连击封顶 3 连）、🌫️ 迷雾（开题前 2 秒选项隐身）、🔮 妖印（蓄力一击被封印）——看到徽章先读效果再作答！遭遇过的词缀都会记进「词缀图鉴」成就。</p>
+        <p><b>📲 接力码</b>把整个进度搬到另一台设备：设置页点「📲 接力码」→「生成本机接力码」，全量存档会被压缩编成一张（或几张）二维码——PC 展示、手机扫码，扫完自动打开本游戏并恢复全部进度（金币/掌握度/成就/词库全都在）；反方向手机→PC 同样成立，也可以「复制全部文本」发给对方粘贴。<b>战斗中也能随时点左上角「📲」生成接力码</b>（答题计时自动暂停，关闭弹层原样续跑）。存档太大时自动分片成多张码，<b>请按顺序逐张扫</b>：每扫一张，接收页面自动收下该片并提示进度，集齐后自动弹恢复确认框并整包校验合并。恢复前会弹确认框，并<b>自动把接收设备的现有存档导出成一次性备份接力码</b>（复制保存即可防误覆盖丢档）。注意：接力=<b>复制不是移动</b>——发送设备的存档原样保留，两台设备各自独立继续。进阶：对局进行中（冒险/无尽/词魂/主题包）生成时勾选「连同进行中的对局一起接力」，关卡号、本局词表、城防、金币、连击也会编进接力码（毒池局与每日远征局因词池绑定挑战码/当日种子，暂只接力存档不接力对局）——恢复后会询问是否续接对局。</p>
+        <p><b>🖼 分享卡</b>战绩一键出图：毒池结算页、每日远征结算页、词魂肉鸽结算页都有「🖼 分享卡」按钮；「☠️ 挑战码」弹窗里的每条投毒战绩右侧也有 🖼 小按钮。生成 900×1200 竖版战报卡：大字标题 + 关键数据（毒词×N/攻克数、远征积分/三枚章、肉鸽到达关卡/天赋/诅咒）+ 日期 + 二维码 + 游戏名角标，配色与游戏同款。手机上支持直接拉起系统分享；电脑或不适用的浏览器自动弹出预览并可「⬇️ 下载 PNG」。毒池战报卡上的二维码是成绩码——好友扫码即可把战报贴回给你。</p>
+        <p><b>🎧 听写挑战</b>主页点「🎧 听写挑战」：全听音拼写的独立模式——有英文语音包时每题只给 🔊 听发音，然后拼出这个单词（点击 🔊 可重听）；当前浏览器没有语音包时自动降级为「释义 + 首字母提示」拼写。不扣血、每局词量自选，作答照常写入掌握度与间隔重复，是练「听得出 + 拼得出」的绝佳加练。</p>
         <p><b>✨ 天赋系统</b>答题、击杀、通关都能获得经验（EXP），升级得天赋点。主界面点「✨ 天赋」加点：🛡️ 钢铁城墙、⏳ 从容不迫、🪙 财富磁石、🧰 战地抢修、🔥 连击之魂、💡 智者启示、🕯️ 不灭意志（城破续命一次）、📖 学者天赋、🎯 缓兵之计、🐉 屠龙蓄能、⚡ 蓄雷一击（每答对 6 题伤害翻倍）、🧾 行囊议价——12 项永久被动，所有模式通用。</p>
         <p><b>🧩 主题挑战包</b>主界面点「🧩 主题包」：「词根家族」把同根词一串串打包集中攻克，「易混淆对」把形近词和变位词成对塞进同一局，「⚡ 高频核心 500」精选考试最爱考的核心词，「🎓 学术词族」专攻论文场景高频词（与高频核心包不重复）。挑战按冒险规则进行（BOSS、词缀、商店都在），学习进度与星级照常写回；每完成一个不同的主题包，「包罗万象」成就就前进一格。</p>
         <p><b>🚀 每日远征</b>主页点「🚀 每日远征」：词池和词缀都由当天日期作种——<b>同一天所有玩家遇到同一批 20 个词、同一条词缀 schedule</b>，第二天自动换一副面孔。三关连打：迎击 8 只 → 精英 10 只（整关挂当日词缀 A，先读横幅再开打）→ BOSS 决战（挂当日词缀 B）。积分 = 击杀×10 + 答对×2 + 最高连击×5 + 通关 100；当日首通额外奖 80🪙，之后可以反复挑战刷当日最高分（城防规则照常，阵亡即远征失败）。</p>
@@ -592,12 +601,88 @@
     </div>
   </div>
 
+  <!-- 接力码（跨设备搬档：生成二维码 / 扫码粘贴恢复） -->
+  <div class="overlay" id="relay-overlay" hidden>
+    <div class="memcard-box io-box relay-box">
+      <div class="memcard-tag">📲 接力码 · 跨设备搬档</div>
+
+      <div id="relay-gen">
+        <div class="relay-row">
+          <button class="btn btn-primary btn-tiny" id="btn-relay-gen">📤 生成本机接力码</button>
+          <span class="hint relay-cap" id="relay-cap"></span>
+        </div>
+        <label class="relay-run-opt" id="relay-run-opt" hidden>
+          <input type="checkbox" id="relay-include-run" checked>
+          连同进行中的对局一起接力（关卡/词表/城防/金币/连击）
+        </label>
+        <div id="relay-qr-wrap" hidden>
+          <canvas id="relay-qr" class="relay-qr" width="10" height="10"></canvas>
+          <div class="relay-pager">
+            <button class="btn btn-tiny" id="btn-relay-prev">◀</button>
+            <span id="relay-page-info">第 1/1 片</span>
+            <button class="btn btn-tiny" id="btn-relay-next">▶</button>
+          </div>
+          <p class="hint">手机扫码即打开本游戏并自动恢复；多张码请<b>按顺序逐张扫</b>（恢复端自动集齐校验后合并）。也可以复制下方完整文本发给对方粘贴。</p>
+        </div>
+        <textarea id="relay-text" spellcheck="false" autocapitalize="off" autocorrect="off" readonly></textarea>
+        <div class="relay-row">
+          <button class="btn btn-tiny" id="btn-relay-copy">📋 复制全部文本</button>
+        </div>
+      </div>
+
+      <div class="relay-sep"></div>
+
+      <div id="relay-recv">
+        <textarea id="relay-in-text" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="粘贴好友发来的接力码文本，或含 #r= 的链接…&#10;多片二维码请按顺序逐张扫：每扫一张打开的页面会自动收下该片并提示进度。"></textarea>
+        <div class="relay-row">
+          <button class="btn btn-primary btn-tiny" id="btn-relay-restore">📥 解析并恢复</button>
+          <span class="hint relay-cap" id="relay-parts-note"></span>
+        </div>
+        <p class="hint">接力=<b>复制不是移动</b>：发送设备存档原样保留，两台设备各自独立继续。恢复前会先自动备份本机存档。</p>
+      </div>
+
+      <div id="relay-confirm" hidden>
+        <p class="relay-warn" id="relay-warn"></p>
+        <div class="relay-backup">
+          <div class="io-log-title">🛟 本机现有存档已生成一次性备份接力码（复制保存，防误覆盖）</div>
+          <textarea id="relay-backup-text" spellcheck="false" autocapitalize="off" autocorrect="off" readonly></textarea>
+          <button class="btn btn-tiny" id="btn-relay-backup-copy">📋 复制备份码</button>
+        </div>
+        <label class="relay-run-opt" id="relay-resume-opt" hidden>
+          <input type="checkbox" id="relay-resume-run" checked>
+          同时续接接力码里进行中的对局（第 <b id="relay-resume-stage">?</b> 关）
+        </label>
+        <div class="spell-actions">
+          <button class="btn btn-tiny" id="btn-relay-cancel">取消</button>
+          <button class="btn btn-primary btn-tiny" id="btn-relay-apply">✅ 确认恢复</button>
+        </div>
+      </div>
+
+      <div class="spell-actions relay-close-row">
+        <button class="btn btn-tiny" id="btn-relay-close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 分享卡预览/下载（支持 navigator.share 的设备直接拉起系统分享） -->
+  <div class="overlay" id="share-overlay" hidden>
+    <div class="memcard-box io-box share-box">
+      <div class="memcard-tag">🖼 分享卡</div>
+      <img id="share-img" class="share-img" alt="战绩分享卡预览">
+      <div class="spell-actions">
+        <button class="btn btn-primary btn-tiny" id="btn-share-download">⬇️ 下载 PNG</button>
+        <button class="btn btn-tiny" id="btn-share-close">关闭</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 全局提示 -->
   <div id="toast-wrap"></div>
 
 </div>
 
-<script src="words.js?v=20261107c"></script>
-<script src="game.js?v=20261107c"></script>
+<script src="libs/qrcode.min.js?v=20261108c"></script>
+<script src="words.js?v=20261108c"></script>
+<script src="game.js?v=20261108c"></script>
 </body>
 </html>
