@@ -464,6 +464,7 @@ var TTS = {
 var Rec = {
   ok: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
   listening: false,
+  sess: null,   /* hold() 会话：{ rec, done }，holdStop 时收音 */
   start: function (word, cb) {
     if (!this.ok) { cb('unsupported'); return; }
     try {
@@ -489,8 +490,81 @@ var Rec = {
       r.onend = function () { if (!done) { done = true; clearTimeout(to); cb('no'); } };
       r.start();
     } catch (e) { cb('err'); }
+  },
+  /* 按住说话（听写挑战·口语跟读）：pointerdown 调 hold 开始收音，pointerup 调 holdStop 收尾；
+     识别结果/出错/收尾都会且只会回调一次。res: 'ok'|'no'|'err'|'unsupported'，
+     'err'=识别服务不可用/无权限（计入连续失败），'no'=没听清/不像 */
+  hold: function (word, cb) {
+    if (!this.ok) { cb('unsupported', '', 0); return null; }
+    var self = this;
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var r = new SR();
+    r.lang = 'en-US';
+    r.interimResults = false;
+    r.maxAlternatives = 3;
+    var sess = { rec: r, done: false };
+    this.sess = sess;
+    var finish = function (res, heard, sim) {
+      if (sess.done) return;
+      sess.done = true;
+      if (self.sess === sess) self.sess = null;
+      clearTimeout(to);
+      try { r.onresult = null; r.onerror = null; r.onend = null; } catch (e) {}
+      cb(res, heard || '', sim || 0);
+    };
+    var to = setTimeout(function () { try { r.stop(); } catch (e) {} }, 6000);   /* 保险：单次最长 6 秒 */
+    r.onresult = function (e) {
+      var alts = [];
+      try { for (var i = 0; i < e.results[0].length; i++) alts.push(e.results[0][i].transcript); } catch (err) {}
+      var best = speakBestMatch(word, alts);
+      finish(best.contains || best.sim >= 0.8 ? 'ok' : 'no', best.heard, best.sim);
+    };
+    r.onerror = function (e) {
+      var err = (e && e.error) || '';
+      finish(err === 'no-speech' || err === 'aborted' ? 'no' : 'err', '', 0);
+    };
+    r.onend = function () { finish('no', '', 0); };
+    try { r.start(); } catch (e) { finish('err', '', 0); }
+    return sess;
+  },
+  holdStop: function () {
+    var s = this.sess;
+    if (s && !s.done) { try { s.rec.stop(); } catch (e) {} }   /* 最终结果随后经 onresult/onend 到达 */
   }
 };
+
+/* ---------- 跟读判分：识别文本归一化（小写/去标点数字空格）+ 编辑距离相似度 ---------- */
+function speakNorm(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+}
+function levDist(a, b) {
+  if (a === b) return 0;
+  var m = a.length, n = b.length;
+  if (!m || !n) return m + n;
+  var prev = [], cur = [], i, j, tmp;
+  for (j = 0; j <= n; j++) prev[j] = j;
+  for (i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
+    }
+    tmp = prev; prev = cur; cur = tmp;
+  }
+  return prev[n];
+}
+/* 在识别候选（含多个 alternatives）里取与目标词最像的一个：
+   含目标词直接判 1（识别常带 "a"/"the" 等赘词），否则编辑距离相似度 ≥0.8 判过 */
+function speakBestMatch(word, alts) {
+  var target = speakNorm(word);
+  var best = { heard: '', sim: 0, contains: false };
+  (alts && alts.length ? alts : ['']).forEach(function (alt) {
+    var norm = speakNorm(alt);
+    var contains = !!target && norm.indexOf(target) >= 0;
+    var sim = contains ? 1 : (target && norm ? 1 - levDist(norm, target) / Math.max(norm.length, target.length) : 0);
+    if (sim >= best.sim) best = { heard: String(alt || '').trim().slice(0, 40), sim: sim, contains: contains };
+  });
+  return best;
+}
 
 /* ========================= 游戏内容常量 ========================= */
 var DIFFS = {
@@ -1260,7 +1334,7 @@ var chargeSt = null;
 function canCharge() {
   return !!(run && run.q && !run.q.locked && !run.ended && combatLike() &&
     $('memcard').hidden && $('banner').hidden &&
-    activeMod() !== 'hex' &&   /* 妖印词缀：蓄力一击被封印 */
+    !hasMod('hex') &&   /* 妖印词缀：蓄力一击被封印 */
     !run.q.chargeUsed && (!chargeSt || !chargeSt.active));
 }
 function cancelCharge() {
@@ -1274,7 +1348,7 @@ function cancelCharge() {
 }
 function tryStartCharge() {
   if (!run || !run.q || run.q.locked || run.ended) return;
-  if (activeMod() === 'hex') {   /* 妖印词缀：给出一次提示，不弹窗轰炸 */
+  if (hasMod('hex')) {   /* 妖印词缀：给出一次提示，不弹窗轰炸 */
     if (!run.q.hexToasted) { run.q.hexToasted = 1; toast('🔮 妖印词缀：蓄力一击被封印！'); }
     return;
   }
@@ -2632,8 +2706,8 @@ var setupMode = 'adventure';
 
 function coinMult() {
   var m = 1 + 0.2 * (save.upgrades.coin || 0) + 0.1 * talentLv('magnet') + (run && run.pet === 'dragon' ? 0.15 : 0);
-  if (activeMod() === 'greed') m += 0.5;   /* 贪婪词缀：金币 +50% */
-  if (activeMod() === 'famine') m *= 0.5;  /* 贫瘠词缀：金币收益减半 */
+  if (hasMod('greed')) m += 0.5;   /* 贪婪词缀：金币 +50% */
+  if (hasMod('famine')) m *= 0.5;  /* 贫瘠词缀：金币收益减半 */
   return m;
 }
 function perQuestionSec() {
@@ -2647,9 +2721,11 @@ function perQuestionSec() {
   if (run.mode === 'adventure' && run.bossStage && run.bossMod === 'haste') base *= 0.75;
   if (run.mode === 'expedition' && run.bossMod === 'haste') base *= 0.75;
   if (run.poison && run.poisonAffix === 'haste') base *= 0.75;
+  if (run.realm && run.realm.mods.indexOf('haste') >= 0) base *= 0.75;   /* 词境词缀·时间压缩（scattered bossMod 分支不覆盖词境，此处单独放行） */
   if (run.rogue && run.rogue.curse === 'haste') base *= 0.7;   /* 全局诅咒·时之砂：放大版提速 */
   if (run.mode === 'adventure' && run.bossStage && run.enrage) base *= 0.88;
-  if (activeMod() === 'freeze') base -= 4;  /* 词缀：时停，固定偷走 4 秒 */
+  if (hasMod('freeze')) base -= 4;  /* 词缀：时停，固定偷走 4 秒 */
+  if (run.realm) base *= run.realm.time;   /* 词境参数：每题时限倍率（0.5~2.0） */
   base += (run.timerAdj || 0);
   return Math.max(4, base);
 }
@@ -2659,14 +2735,26 @@ function combatLike() {
   return run && (run.mode === 'adventure' || run.mode === 'endless' || run.mode === 'expedition');
 }
 /* 当前生效的 BOSS 词缀：词魂肉鸽的全局诅咒（整局）优先，其次是冒险 BOSS 关、
-   远征关卡或噩梦毒池的挑战码词缀 */
+   远征关卡或噩梦毒池的挑战码词缀；词境工坊的词缀（≤2 条）随 run.realm 注入 */
 function activeMod() {
   if (!run) return '';
+  if (run.realm && run.realm.mods && run.realm.mods.length) return run.realm.mods[0];
   if (run.rogue && run.rogue.curse) return run.rogue.curse;
   if (run.mode === 'adventure' && run.bossStage && run.bossMod) return run.bossMod;
   if (run.mode === 'expedition' && run.bossMod) return run.bossMod;
   if (run.poison && run.poisonAffix) return run.poisonAffix;
   return '';
+}
+/* 本局全部生效词缀（词境可叠 2 条；其余模式恒为 0 或 1 条）。
+   词缀钩子一律用 hasMod(id) 判定，等效替换原 activeMod()===id，词境外行为不变 */
+function activeMods() {
+  if (!run) return [];
+  if (run.realm && run.realm.mods && run.realm.mods.length) return run.realm.mods;
+  var m = activeMod();
+  return m ? [m] : [];
+}
+function hasMod(id) {
+  return activeMods().indexOf(id) >= 0;
 }
 
 function startRun(mode, listIds, diffKey, explicitPool, rogueCfg) {
@@ -2694,6 +2782,7 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
     coinsEarned: 0, reinforce: [], recent: [], records: [], recordsBy: {},
     monster: null, q: null, pendingRevenge: false, reviewTotal: 12,
     pet: save.pet || '', timerAdj: 0, hist: [], wrongTotal: 0, timeline: [],
+    speakTotal: 0, speakPass: 0, speakErrStreak: 0, speakDisabled: false,   /* 听写·口语跟读统计 */
     willUsed: false, smiteN: 0, packId: '', expMods: null, expScore: 0,
     planQueue: (mode === 'plan') ? pool.slice() : null,
     unitCtx: unitCtx || null, unitSet: null,
@@ -2733,6 +2822,8 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
   $('q-options').className = 'q-options';
   $('q-options').hidden = false;
   $('q-spell').hidden = true;
+  $('q-speak').hidden = true;
+  $('q-speak').innerHTML = '';
   $('q-memo').hidden = true;
   $('q-memo').innerHTML = '';
   $('btn-replay').hidden = true;
@@ -2781,7 +2872,11 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
     showBanner('🎯 今日学习计划', '复习 ' + dueN + ' 个到期词 · 新词 ' + freshN + ' 个 · 不扣血', function () { nextMonster(); }, 1700);
   } else if (mode === 'dictation') {
     applyTheme(0);
-    showBanner('🎧 听写挑战', '共 ' + run.reviewTotal + ' 词 · ' + (TTS.ok ? '全听音拼写，点击 🔊 可重听' : '当前无英文语音包，按首字母提示拼写') + ' · 不扣血', function () { nextMonster(); }, 1700);
+    if (save.settings.speak && !Rec.ok) toast('当前浏览器不支持语音识别，本局跟读不可用，按普通听写进行');
+    showBanner('🎧 听写挑战', '共 ' + run.reviewTotal + ' 词 · ' +
+      (save.settings.speak && Rec.ok ? '🎤 跟读开启：每题先出词面，按住麦克风读出来（需联网）'
+        : (TTS.ok ? '全听音拼写，点击 🔊 可重听' : '当前无英文语音包，按首字母提示拼写')) + ' · 不扣血',
+      function () { nextMonster(); }, 1700);
   } else {
     beginStage();
   }
@@ -2860,6 +2955,7 @@ function spawnMonster() {
     var tough = (run.mode === 'endless') ? run.kills >= 12 : (run.mode === 'expedition' ? run.stage >= 2 : run.stage >= 6);
     hp = (combatLike() && tough && Math.random() < 0.25) ? 2 : 1;
   }
+  if (run.realm) hp = Math.max(1, Math.round(hp * run.realm.monhp));   /* 词境参数：怪物血量倍率（0.5~3.0） */
   var pick = boss ? rnd(BOSSES) : rnd(MONSTERS);
   /* 词魂肉鸽·词根法师：上一只怪被击杀时溅射，本怪入场 -1 血（至少 1） */
   if (run.rogue && run.rogue.splash) {
@@ -2867,7 +2963,7 @@ function spawnMonster() {
     hp = Math.max(1, hp - 1);
     fx('🔥 词根溅射：本怪入场 -1 血', 'good', 25, 20);
   }  run.monster = { emoji: pick[0], name: pick[1], hp: hp, maxHp: hp, boss: boss, hpSet: !run.poison,
-    shield: (activeMod() === 'ward') ? 1 : 0 };   /* 石肤词缀：怪物带 1 层护盾 */
+    shield: hasMod('ward') ? 1 : 0 };   /* 石肤词缀：怪物带 1 层护盾 */
   var me = $('monster-emoji');
   me.textContent = pick[0];
   me.className = 'monster-emoji' + (boss ? ' boss boss-enter' : '');
@@ -2901,6 +2997,17 @@ function spawnMonster() {
     modEl.innerHTML = pm.icon + ' ' + pm.name;
     modEl.title = pm.desc + '（挑战码词缀）';
     modEl.hidden = false;
+  } else if (run.realm && run.realm.mods.length) {
+    var rmTxt = '', rmTip = '';
+    run.realm.mods.forEach(function (mid) {
+      var rm = BOSS_MODS[mid];
+      if (!rm) return;
+      rmTxt += (rmTxt ? ' + ' : '') + rm.icon + ' ' + rm.name;
+      rmTip += (rmTip ? '；' : '') + rm.name + '：' + rm.desc;
+    });
+    modEl.innerHTML = rmTxt;
+    modEl.title = rmTip + '（词境词缀）';
+    modEl.hidden = !!rmTxt ? false : true;
   } else if (run.rogue && run.rogue.curse && BOSS_MODS[run.rogue.curse]) {
     var rogM = BOSS_MODS[run.rogue.curse];
     modEl.innerHTML = rogM.icon + ' ' + rogM.name;
@@ -2968,7 +3075,7 @@ function renderQuestion() {
   $('btn-hint').disabled = run.hints <= 0;
   $('hint-count').textContent = run.hints;
   /* 沉默词缀：提示卡被封印 */
-  var silenced = activeMod() === 'silence';
+  var silenced = hasMod('silence');
   if (silenced) { $('btn-hint').disabled = true; $('btn-spell-hint').disabled = true; }
 
   /* 记忆提示（词根 + 图像）：有内容才显示按钮，每题重置 */
@@ -2996,22 +3103,31 @@ function renderQuestion() {
     prompt.className = 'q-prompt listen-prompt';
     setTimeout(function () { if (run && run.q === q) TTS.speak(q.word.w, true); }, 350);
   } else {
-    /* 听写挑战：有语音包=纯听音拼写（题面只留 🔊）；无语音包降级为首字母提示拼写 */
-    if (run.mode === 'dictation') {
-      if (TTS.ok) {
-        prompt.innerHTML = '🔊';
-        prompt.className = 'q-prompt listen-prompt';
-        setTimeout(function () { if (run && run.q === q) TTS.speak(q.word.w, true); }, 350);
-      } else {
-        prompt.textContent = q.word.m + '　（首字母：' + q.word.w.charAt(0).toUpperCase() + '…）';
-      }
+    if (run.mode === 'dictation' && speakPhaseOn(q)) {
+      /* 口语跟读：每题先出词面，按住麦克风读出来判分（判不过可重说或改用拼写） */
+      prompt.textContent = q.word.w;
+      prompt.className = 'q-prompt speak-prompt';
+      $('q-options').hidden = true;
+      $('q-spell').hidden = true;
+      renderSpeakPhase();
     } else {
-      prompt.textContent = q.word.m;
+      /* 听写挑战：有语音包=纯听音拼写（题面只留 🔊）；无语音包降级为首字母提示拼写 */
+      if (run.mode === 'dictation') {
+        if (TTS.ok) {
+          prompt.innerHTML = '🔊';
+          prompt.className = 'q-prompt listen-prompt';
+          setTimeout(function () { if (run && run.q === q) TTS.speak(q.word.w, true); }, 350);
+        } else {
+          prompt.textContent = q.word.m + '　（首字母：' + q.word.w.charAt(0).toUpperCase() + '…）';
+        }
+      } else {
+        prompt.textContent = q.word.m;
+      }
+      $('q-options').hidden = true;
+      $('q-spell').hidden = false;
+      $('btn-spell-hint').disabled = run.hints <= 0 || hasMod('silence');
+      renderSpell();
     }
-    $('q-options').hidden = true;
-    $('q-spell').hidden = false;
-    $('btn-spell-hint').disabled = run.hints <= 0 || activeMod() === 'silence';
-    renderSpell();
   }
 
   if (q.type === 'c2e' || q.type === 'e2c' || q.type === 'listen') {
@@ -3024,7 +3140,7 @@ function renderQuestion() {
     });
     if (run.hints > 0) $('btn-hint').hidden = false;
     /* 迷雾词缀：开题前 2 秒选项被雾遮住，硬猜有风险，先想词根再等雾散 */
-    if (activeMod() === 'fog') {
+    if (hasMod('fog')) {
       $('q-options').classList.add('fogged');
       var fogSeq = runEpoch;
       setTimeout(function () {
@@ -3086,14 +3202,14 @@ function tapChip(idx) {
   updateSpellUI();
 }
 function spellBack() {
-  if (!run || !run.q || run.q.locked || run.q.type !== 'spell') return;
+  if (!run || !run.q || run.q.locked || run.q.type !== 'spell' || !spellState) return;
   spellState.picked.pop();
   updateSpellUI();
 }
 function spellHint() {
-  if (!run || !run.q || run.q.locked || run.q.type !== 'spell') return;
+  if (!run || !run.q || run.q.locked || run.q.type !== 'spell' || !spellState) return;
   if (run.hints <= 0) return;
-  if (activeMod() === 'silence') { toast('🔕 沉默词缀：提示被封印！'); return; }
+  if (hasMod('silence')) { toast('🔕 沉默词缀：提示被封印！'); return; }
   var q = run.q;
   var need = q.word.w[spellState.picked.length];
   for (var i = 0; i < q.shuffled.length; i++) {
@@ -3110,7 +3226,7 @@ function spellHint() {
   }
 }
 function submitSpell() {
-  if (!run || !run.q || run.q.locked || run.q.type !== 'spell') return;
+  if (!run || !run.q || run.q.locked || run.q.type !== 'spell' || !spellState) return;
   var q = run.q;
   if (spellState.picked.length !== q.word.w.length) return;
   var str = spellState.picked.map(function (i) { return q.shuffled[i]; }).join('');
@@ -3119,6 +3235,152 @@ function submitSpell() {
   } else {
     resolve(false);
   }
+}
+
+/* ---------- 听写挑战 · 口语跟读（说出来才算学会） ----------
+   跟读开关在听写出战设置（记忆于存档 settings.speak）。开启后每题先出词面：
+   按住麦克风（Web Speech Recognition，en-US）读出单词——编辑距离相似度 ≥0.8 或
+   整词命中判过 → resolve(true) 正常进入 SRS 记忆流程并标记 answeredVia='speak'；
+   判不过给出识别内容与正确发音，可重说或改用拼写。跟读结果进结算（跟读 N/通过 M）。
+   兼容底线：不支持 SpeechRecognition / 连续 3 次识别不可用或无权限 → toast 说明并
+   本局自动关闭跟读（speakDisabled），答题流程完全不受影响；识别需联网（浏览器内置语音服务）。 */
+var speakSess = null;          /* 当前跟读会话标记 */
+var speakPausedLeftMs = 0;     /* 聆听期间冻结的答题剩余毫秒（同接力弹层的 deadline 冻结） */
+
+function speakPhaseOn(q) {
+  return !!(run && run.mode === 'dictation' && save.settings.speak && Rec.ok &&
+    !run.speakDisabled && q && q.type === 'spell' && q.retries === 0 && /^[a-z]+$/.test(q.word.w));
+}
+function renderSpeakPhase() {
+  var q = run.q;
+  $('q-type').textContent = '🎤 跟读：大声说出这个单词';
+  var el = $('q-speak');
+  el.hidden = false;
+  el.innerHTML = '<button class="btn btn-primary btn-big speak-mic" id="btn-speak-hold">🎤 按住说话</button>' +
+    '<div class="speak-status" id="speak-status">看词面，按住麦克风大声读出来！</div>';
+  TTS.speak(q.word.w, true);   // 出词面时先示范一遍正确发音，照着读
+  var mic = $('btn-speak-hold');
+  var down = false;
+  mic.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    if (down || (speakSess && speakSess.active)) return;
+    down = true;
+    speakBegin();
+  });
+  var up = function () { if (!down) return; down = false; speakEndHold(); };
+  mic.addEventListener('pointerup', up);
+  mic.addEventListener('pointercancel', up);
+  mic.addEventListener('pointerleave', up);
+}
+function speakBegin() {
+  if (!run || !run.q || run.q.locked || run.ended) return;
+  var q = run.q;
+  if (speakSess && speakSess.active) return;
+  var mic = $('btn-speak-hold'), st = $('speak-status');
+  speakPauseTimer();   // 聆听期间冻结 deadline（松开后按剩余时间续跑）
+  if (mic) { mic.classList.add('listening'); mic.textContent = '🎙️ 正在聆听…松开结束'; }
+  if (st) st.textContent = '🎙️ 正在聆听…请大声读出「' + q.word.w + '」';
+  var seq = runEpoch;
+  speakSess = { active: true };
+  Rec.hold(q.word.w, function (res, heard, sim) {
+    speakSess = null;
+    if (!run || run.ended || runEpoch !== seq || run.q !== q || q.locked) return;
+    speakResumeTimer();
+    handleSpeakResult(res, heard, sim);
+  });
+}
+function speakEndHold() {
+  if (speakSess && speakSess.active) Rec.holdStop();
+}
+function speakPauseTimer() {
+  if (run && run.q && !run.q.locked && timerRAF && timerEnd > 0) {
+    speakPausedLeftMs = Math.max(0, timerEnd - performance.now());
+    stopTimer();
+  }
+}
+function speakResumeTimer() {
+  if (!run || run.ended || !run.q || run.q.locked) { speakPausedLeftMs = 0; return; }
+  if (speakPausedLeftMs > 0) {
+    timerEnd = performance.now() + speakPausedLeftMs;
+    speakPausedLeftMs = 0;
+    if (timerEnd > performance.now()) { lastTickT = 0; tick(); }
+  }
+}
+function handleSpeakResult(res, heard, sim) {
+  var q = run.q;
+  if (!q) return;
+  var mic = $('btn-speak-hold'), st = $('speak-status');
+  if (res === 'ok') {
+    if (!q.speakCounted) { q.speakCounted = true; run.speakTotal++; }
+    run.speakPass++;
+    q.answeredVia = 'speak';
+    save.stats.speakOk = (save.stats.speakOk || 0) + 1;
+    if (mic) { mic.classList.remove('listening'); mic.disabled = true; mic.textContent = '✅ 发音通过！'; }
+    if (st) st.textContent = '✅ 发音通过（相似度 ' + Math.round(sim * 100) + '%）！进入记忆流程…';
+    Sfx.correct(run.combo + 1);
+    Confetti.burst(20);
+    var seq = runEpoch;
+    setTimeout(function () {
+      if (!run || run.ended || runEpoch !== seq || run.q !== q || q.locked) return;
+      resolve(true);   // 判过 → 正常进入 SRS 记忆流程（击杀/掌握度/间隔重复照常）
+    }, 550);
+    return;
+  }
+  /* 判不过/识别失败：重置麦克风，给出识别内容与正确发音，可重说或改用拼写 */
+  if (mic) { mic.classList.remove('listening'); mic.textContent = '🎤 按住说话'; }
+  if (res === 'err') {
+    run.speakErrStreak = (run.speakErrStreak || 0) + 1;
+    if (run.speakErrStreak >= 3) {
+      run.speakDisabled = true;   // 连续 3 次不可用：本局自动关闭跟读，答题流程不受影响
+      toast('🎙️ 语音识别连续失败，本局跟读已自动关闭，改用拼写作答（答题流程不受影响）');
+      speakToFallback();
+      return;
+    }
+    if (st) st.textContent = '🎙️ 没有听清/识别不可用（' + run.speakErrStreak + '/3），请再试一次或改用拼写（需联网）';
+  } else {
+    if (st) {
+      st.innerHTML = '🤔 听到的是「<span class="heard">' + realmEsc(heard || '…') + '</span>」· 正确发音：<b>' +
+        realmEsc(q.word.w) + '</b>' + (q.word.m ? '（' + realmEsc(q.word.m) + '）' : '');
+    }
+    TTS.speak(q.word.w, true);   // 判不过：读一遍正确发音
+  }
+  if (st) {
+    var acts = document.createElement('div');
+    acts.className = 'speak-actions';
+    var bRetry = document.createElement('button');
+    bRetry.className = 'btn btn-tiny btn-primary';
+    bRetry.textContent = '🔁 重说';
+    bRetry.onclick = function () { renderSpeakPhase(); };
+    var bSpell = document.createElement('button');
+    bSpell.className = 'btn btn-tiny';
+    bSpell.textContent = '⌨️ 改用拼写';
+    bSpell.onclick = speakToFallback;
+    acts.appendChild(bRetry);
+    acts.appendChild(bSpell);
+    st.appendChild(acts);
+  }
+}
+/* 改用拼写：退出跟读面板，回到听写常规拼写出题形态（词面撤下，防止照抄） */
+function speakToFallback() {
+  var q = run.q;
+  if (!q || q.locked) return;
+  speakSess = null;
+  $('q-speak').hidden = true;
+  $('q-speak').innerHTML = '';
+  $('q-type').textContent = TTS.ok ? '🎧 听音拼写（点击 🔊 重听）' : '🎧 听音拼写 · 无语音包，首字母提示';
+  var prompt = $('q-prompt');
+  prompt.className = 'q-prompt';
+  if (TTS.ok) {
+    prompt.innerHTML = '🔊';
+    prompt.className = 'q-prompt listen-prompt';
+    setTimeout(function () { if (run && run.q === q && !q.locked) TTS.speak(q.word.w, true); }, 200);
+  } else {
+    prompt.textContent = q.word.m + '　（首字母：' + q.word.w.charAt(0).toUpperCase() + '…）';
+  }
+  $('q-spell').hidden = false;
+  $('btn-spell-hint').disabled = run.hints <= 0 || hasMod('silence');
+  renderSpell();
+  speakResumeTimer();   // 聆听冻结的剩余时长继续走
 }
 
 /* ---------- 选择题 ---------- */
@@ -3144,7 +3406,7 @@ function onChoice(i, btn) {
 
 function useHint() {
   if (!run || !run.q || run.q.locked || run.hints <= 0) return;
-  if (activeMod() === 'silence') { toast('🔕 沉默词缀：提示被封印！'); return; }
+  if (hasMod('silence')) { toast('🔕 沉默词缀：提示被封印！'); return; }
   var q = run.q;
   if (q.type !== 'c2e' && q.type !== 'e2c' && q.type !== 'listen') return;
   var wrongIdx = [];
@@ -3166,6 +3428,7 @@ var timerRAF = null, timerEnd = 0, timerDur = 1, lastTickT = 0;
 
 function addPressure(n) {
   if (!run || run.ended) return;
+  if (n > 0 && run.realm && run.realm.castle !== 1) n = n * run.realm.castle;   /* 词境参数：城防血量倍率（0.5~2.0），只放大敌方推进 */
   if (n < 0) { run.pressure = Math.max(0, run.pressure + n); updateHUD(); return; }
   run.pressure = Math.min(100, run.pressure + n);
   updateHUD();
@@ -3297,12 +3560,12 @@ function resolveCore(ok, timedOut) {
   }
 
   /* 贪婪词缀：金币 +50% 的代价——每答 1 题敌军压境 +2% */
-  if (activeMod() === 'greed' && combatLike()) addPressure(2);
+  if (hasMod('greed') && combatLike()) addPressure(2);
 
   if (ok) {
     run.correct++;
     run.combo++;
-    if (activeMod() === 'curse' && run.combo > 3) run.combo = 3;   /* 诅咒词缀：连击封顶 3 连 */
+    if (hasMod('curse') && run.combo > 3) run.combo = 3;   /* 诅咒词缀：连击封顶 3 连 */
     run.maxCombo = Math.max(run.maxCombo, run.combo);
     rec.ok++;
     run.timeline.push({ ok: 1, combo: run.combo });   /* 结算页节奏图数据 */
@@ -3315,7 +3578,7 @@ function resolveCore(ok, timedOut) {
 
     save.stats.maxCombo = Math.max(save.stats.maxCombo, run.combo);
     bumpTask('q_correct');
-    if (q.type === 'spell') { save.stats.spellOk++; bumpTask('spell_ok'); }
+    if (q.type === 'spell' && q.answeredVia !== 'speak') { save.stats.spellOk++; bumpTask('spell_ok'); }   /* 跟读判过不计拼写（answeredVia='speak' 已单独记 speakOk） */
     if (q.type === 'listen') { save.stats.listenOk++; bumpTask('listen_ok'); }
     setTask('combo_hit', run.combo);
     if (save.mastery[word.w] && save.mastery[word.w].seen === 1) bumpTask('new_words');
@@ -3477,7 +3740,7 @@ function monsterAttack(cb) {
   if (run.poison && run.poisonAffix === 'thorn') spike += 1;
   if (run.mode === 'expedition' && run.bossMod === 'rage') spike += 3;    /* 远征精英关：狂暴对整关生效 */
   if (run.mode === 'expedition' && run.bossMod === 'thorn') spike += 1;
-  if (activeMod() === 'tide') spike += Math.min(15, run.answered);   /* 狂潮：每答 1 题攻势 +1% */
+  if (hasMod('tide')) spike += Math.min(15, run.answered);   /* 狂潮：每答 1 题攻势 +1% */
   if (run.rogue && run.rogue.curse === 'rage') spike *= 1.4;          /* 全局诅咒·怒火燎原 */
   if (run.rogue && run.rogue.curse === 'thorn') spike += 2;           /* 全局诅咒·荆棘之地 */
   /* 词魂肉鸽·复仇骑士：复仇题答错时友军按住兵刃，不伤城防 */
@@ -3518,7 +3781,7 @@ function monsterAttack(cb) {
 function killMonster() {
   var m = run.monster;
   /* 不死词缀：每只怪第一次被击倒时以 1 血爬起来 */
-  if (activeMod() === 'molt' && !m.moltUsed) {
+  if (hasMod('molt') && !m.moltUsed) {
     m.moltUsed = true;
     m.hp = 1;
     fx('🧟 不死词缀：它又爬起来了！', 'bad', 25, 22);
@@ -3587,12 +3850,13 @@ function stageClear() {
   save.coins += bonus;
   run.coinsEarned += bonus;
   addXp(8);
-  if (run.mode === 'adventure' && !run.poison && !run.rogue) save.best.adventure = Math.max(save.best.adventure, run.stage);
+  if (run.mode === 'adventure' && !run.poison && !run.rogue && !run.realm) save.best.adventure = Math.max(save.best.adventure, run.stage);
   if (run.packId && !run.poison) markPackDone();   /* 主题挑战包：通过第 1 关那一刻即计完成 */
   persist();
   Sfx.levelup();
   Confetti.burst(60);
   if (run.poison) { endRun('done'); return; }   /* 噩梦关卡一战定胜负，不进商店 */
+  if (run.realm) { endRun('done'); return; }   /* 词境一战定胜负，不进商店 */
   if (run.rogue) {
     /* 词魂肉鸽：第 6 关 BOSS 拿下即加冕通关（+100🪙 加冕礼），城破之外的结算不进商店 */
     if (run.stage >= ROGUE_STAGES) {
@@ -3836,6 +4100,8 @@ function endRunCore(reason) {
     }
     if (run.poison && reason === 'done') titles.done = '☠️ 噩梦通关！';
     if (run.poison && reason === 'quit') titles.quit = '🏳️ 逃出毒池';
+    if (run.realm && reason === 'done') titles.done = '🌌 词境通关！';
+    if (run.realm && reason === 'quit') titles.quit = '🏳️ 逃出词境';
     if (run.rogue && reason === 'done') titles.done = '👑 词魂加冕！';
     if (run.rogue && reason === 'quit') titles.quit = '🏳️ 词魂撤退';
     if (run.mode === 'plan' && reason === 'done') {
@@ -3851,7 +4117,7 @@ function endRunCore(reason) {
         checkAch();
       }
     }
-    if (run.mode === 'adventure' && !run.poison && !run.rogue) {
+    if (run.mode === 'adventure' && !run.poison && !run.rogue && !run.realm) {
       save.best.adventure = Math.max(save.best.adventure, run.stage);
     } else if (run.mode === 'endless') {
       save.best.endless = Math.max(save.best.endless, run.kills);
@@ -3875,12 +4141,14 @@ function endRunCore(reason) {
       stats.push('🎲 ' + (reason === 'done' ? '词魂加冕！' : '止步第 ' + run.stage + ' 关'), '⚔️ 击杀 ' + run.kills);
       if (rgt) stats.push(rgt.icon + ' ' + rgt.name);
       if ((run.rogue.chainN || 0) > 0) stats.push('🔗 词根连锁 ×' + run.rogue.chainN);
-    } else if (run.mode === 'adventure') stats.push('🏆 抵达第 ' + run.stage + ' 关', '⚔️ 击杀 ' + run.kills);
+    } else if (run.mode === 'adventure' && !run.realm) stats.push('🏆 抵达第 ' + run.stage + ' 关', '⚔️ 击杀 ' + run.kills);
     if (run.mode === 'endless') stats.push('⚔️ 击杀 ' + run.kills + ' 只');
     if (run.mode === 'expedition') stats.push('🚀 远征积分 ' + (run.expScore || 0), '⚔️ 击杀 ' + run.kills + ' / 19',
       '📈 今日最高 ' + ((save.expedition && save.expedition.date === expDayStamp()) ? save.expedition.best : 0));
+    if (run.realm) stats.push('🌌 词境 ' + run.kills + '/' + run.stageSize + ' 词');
     if (run.mode === 'review') stats.push('📖 复习 ' + run.kills + ' 词');
     if (run.mode === 'dictation') stats.push('🎧 听写 ' + run.kills + ' 词');
+    if (run.speakTotal > 0) stats.push('🎤 跟读 ' + run.speakPass + '/' + run.speakTotal);
     if (run.mode === 'drill') stats.push('🔥 强化 ' + run.kills + ' 词');
     if (run.mode === 'plan') stats.push('🎯 计划完成 ' + run.kills + ' 词');
     stats.push('✏️ 答题 ' + run.answered + ' 题', '🎯 正确率 ' + acc + '%', '🔥 最高连击 ' + run.maxCombo, '🪙 获得 ' + run.coinsEarned, '📅 连续打卡 ' + save.streak.count + ' 天');
@@ -4039,6 +4307,8 @@ function updateHUD() {
   if (run.mode === 'adventure') {
     if (run.poison) {
       $('battle-stage').textContent = '☠️ 毒池 ' + run.kills + '/' + run.stageSize;
+    } else if (run.realm) {
+      $('battle-stage').textContent = '🌌 词境 ' + run.kills + '/' + run.stageSize;
     } else if (run.rogue) {
       $('battle-stage').textContent = '🎲 ' + (run.bossStage ? '⚠️ ' : '') + '第 ' + run.stage + '/' + ROGUE_STAGES + ' 关';
     } else {
@@ -4268,6 +4538,15 @@ function openSetup(mode) {
   $('size-note').textContent = mode === 'review' ? '本次复习的单词数量'
     : (mode === 'dictation' ? '本次听写的单词数量'
     : (mode === 'expedition' ? '远征词量由今日种子决定（20 词）' : '每关出战的单词数量'));
+
+  /* 🎤 跟读开关：只在听写挑战出现（记忆于存档）；不支持语音识别的浏览器整行隐藏 */
+  var speakRow = $('speak-row');
+  if (mode === 'dictation' && Rec.ok) {
+    speakRow.hidden = false;
+    $('speak-toggle').checked = !!save.settings.speak;
+  } else {
+    speakRow.hidden = true;
+  }
 
   showScreen('scr-setup');
 }
@@ -5399,6 +5678,9 @@ function bindEvents() {
     if (duel && duel.phase !== 'done' && duel.qi > 0 && !confirm('确定退出？当前对决进度将丢弃')) return;
     closeDuel();
   };
+  // 词境工坊
+  $('btn-realm').onclick = openRealm;
+  realmBind();
 
   // 设置页
   $('btn-setup-back').onclick = function () { showScreen('scr-home'); };
@@ -5410,6 +5692,10 @@ function bindEvents() {
   };
   $('setup-size').onchange = function () {
     save.sessionSize = parseInt(this.value, 10) || 10;
+    persist();
+  };
+  $('speak-toggle').onchange = function () {
+    save.settings.speak = this.checked;
     persist();
   };
 
@@ -5488,6 +5774,7 @@ function bindEvents() {
     else if (run.mode === 'dictation') openSetup('dictation');
     else if (run.mode === 'plan') { showScreen('scr-home'); refreshHome(); }
     else if (run.mode === 'drill') { openWrongBook(); }
+    else if (run.realm) startRealmBattle(run.realm);
     else if (run.poison) startNightmare(run.poison.data);
     else if (run.rogue) startRogueDraft();
     else if (run.packId) startPackRun(run.packId);
@@ -6185,24 +6472,25 @@ function relayAcceptShard(i, n, b64) {
   return { done: true, obj: obj };
 }
 
-/* 恢复存档（reload）后：localStorage 里带着对局快照（读后即焚）→ 询问是否续接 */
+/* 恢复存档（reload）后：localStorage 里带着对局快照（读后即焚）→ 直接续接。
+   修复（第 7 轮）：此前这里还会再弹一次原生 confirm「现在续接吗？」——但恢复确认框
+   里用户已通过勾选「同时续接接力码里进行中的对局」+「✅ 确认恢复」明确表态过，
+   二次弹窗的「取消」会悄悄推翻用户已确认的选择（确认/取消与文案相反）。
+   现在勾选框是唯一闸门：勾了=恢复后自动续接（快照仅当日有效），没勾=只恢复存档。 */
 function relayResumeAfterReload() {
   var raw = null;
   try {
     raw = localStorage.getItem(RESUME_RUN_KEY);
-    localStorage.removeItem(RESUME_RUN_KEY);   /* 无论选不选都只问这一次 */
+    localStorage.removeItem(RESUME_RUN_KEY);   /* 读后即焚，无论续不续都不再问 */
   } catch (e) {}
   if (!raw) return;
   var snap = null;
   try { snap = JSON.parse(raw); } catch (e) {}
   var s = relaySanitizeSnapshot(snap && snap.run ? snap.run : snap);
   if (!s) return;
-  /* 当日有效：隔天的对局快照不再弹（城防/横幅状态早过期了） */
+  /* 当日有效：隔天的对局快照不再续接（城防/横幅状态早过期了） */
   if (snap && snap.t && new Date(snap.t).toDateString() !== new Date().toDateString()) return;
-  if (confirm('接力码里带着一局进行中的对局：第 ' + s.stage + ' 关 · 城防 ' + s.pressure + '% · 连击 ×' + s.combo +
-      '。现在续接吗？（取消=只恢复存档，从主页重新开局）')) {
-    relayResumeRun(s);
-  }
+  relayResumeRun(s);
 }
 
 /* ---------- 对局快照（大胆层：run 级接力，第二层） ----------
@@ -6211,7 +6499,7 @@ function relayResumeAfterReload() {
 function relayRunSnapshot() {
   if (!run || run.ended) return null;
   if (run.mode !== 'adventure' && run.mode !== 'endless') return null;
-  if (run.poison) return null;
+  if (run.poison || run.realm) return null;
   return {
     mode: run.mode,
     diffKey: run.diffKey || 'normal',
@@ -6490,7 +6778,10 @@ function relayShowConfirm(obj) {
   }
   var hasRun = !!relayUi.incoming.run;
   $('relay-resume-opt').hidden = !hasRun;
-  if (hasRun) $('relay-resume-stage').textContent = String(relayUi.incoming.run.stage);
+  if (hasRun) {
+    $('relay-resume-stage').textContent = String(relayUi.incoming.run.stage);
+    $('relay-resume-run').checked = true;   /* 每次恢复重置为勾选：上一次的取消勾选不泄漏到这次 */
+  }
 }
 function relayApply() {
   var inc = relayUi.incoming;
@@ -6540,6 +6831,513 @@ function relayBind() {
   $('btn-relay-apply').onclick = relayApply;
   $('btn-relay-close').onclick = relayClose;
   $('relay-include-run').onchange = relayGenerate;   /* 勾选变化即时重生成 */
+}
+
+/* ========================= 词境工坊（玩家自制关卡 · UGC，零服务器） =========================
+   三步构建一个词境：① 选词源（4 个主题包/错题本勾选，或粘贴自定义词表，上限 30 词
+   且必须存在于内置 2909 词词典）→ ② 选 BOSS 词缀（≤2 条，复用词缀池与战斗钩子）
+   → ③ 调参数（城防血量/怪物血量/每题时限倍率 + 可选开场引言 ≤50 字）。
+   词境码复用接力码的分片与 CRC 管线（DEFLATE + CRC16 + base64url + #m=i/n 分片 hash），
+   文本形态前缀 RM.（与接力码 R1./挑战码 W·R 区分）；30 词+参数+引言单码可承载，超长自动分片。
+   开战走 startRun 显式词池 + 词缀注入（同投毒通道），战斗照常写回 updateMastery/SRS。
+   「我的词境」存 localStorage（wq_realms_v1），读取时逐条清洗，坏档自动丢弃自愈。 */
+var REALMS_KEY = 'wq_realms_v1';        /* 我的词境列表 */
+var REALM_TEXT_PREFIX = 'RM.';          /* 词境码文本前缀 */
+var REALM_PARTS_KEY = 'wq_realm_parts'; /* 词境码分片收集进度（同接力码 30 分钟时效） */
+var REALM_MAX_WORDS = 30;
+var REALM_SRC_PACKS = null;             /* 惰性：[{id:'pack:roots',...}]，随 PACKS 生成 */
+
+function realmEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+/* 词境数据清洗：词必须都在内置词典内（跨设备词库一致才互通），参数夹取合法区间 */
+function sanitizeRealm(src) {
+  if (!src || typeof src !== 'object' || src instanceof Array) return null;
+  if (!buildEnc()) return null;
+  var seen = {}, words = [];
+  (src.words instanceof Array ? src.words : []).forEach(function (w) {
+    if (typeof w !== 'string') return;
+    w = w.toLowerCase();
+    if (!seen[w] && ENC_INDEX[w] !== undefined) { seen[w] = 1; words.push(w); }
+  });
+  if (words.length < 4) return null;   /* 少于 4 词出不了像样的题（干扰项/词量都吃紧） */
+  var mods = [];
+  (src.mods instanceof Array ? src.mods : []).forEach(function (m) {
+    if (typeof m === 'string' && BOSS_MODS[m] && mods.indexOf(m) < 0) mods.push(m);
+  });
+  mods = mods.slice(0, 2);
+  return {
+    v: 1,
+    words: words.slice(0, REALM_MAX_WORDS),
+    mods: mods,
+    castle: numOr(src.castle, 1, 0.5, 2),
+    monhp: numOr(src.monhp, 1, 0.5, 3),
+    time: numOr(src.time, 1, 0.5, 2),
+    intro: typeof src.intro === 'string' ? src.intro.slice(0, 50) : '',
+    t: intOr(src.t, 0, 0, 8.64e15)
+  };
+}
+
+/* ---------- 词境码编解码（复用接力码的 DEFLATE/CRC/base64/分片管线） ----------
+   二进制 payload：'R'(0x52) 'M'(0x4D) ver flags crc16_hi crc16_lo body...
+   flags bit0 = body 已 DEFLATE 压缩；body = UTF-8 JSON：{ v:1, realm:{...} } */
+function realmBuildPayload(realm) {
+  var json = JSON.stringify({ v: 1, realm: realm });
+  var raw = wqUtf8Enc(json);
+  var packed = WQ_DEFLATE.deflate(raw);
+  var useDeflate = packed.length < raw.length;
+  var body = useDeflate ? packed : raw;
+  var head = [0x52, 0x4D, 1, useDeflate ? 1 : 0];
+  var crc = WQ_DEFLATE.crc16(body);
+  head.push((crc >> 8) & 255, crc & 255);
+  return head.concat(body);
+}
+function realmParsePayload(bytes) {
+  if (bytes.length < 7 || bytes[0] !== 0x52 || bytes[1] !== 0x4D) throw new Error('realm: bad magic');
+  var ver = bytes[2], flags = bytes[3];
+  if (ver !== 1) throw new Error('realm: unsupported version ' + ver);
+  var crc = (bytes[4] << 8) | bytes[5];
+  var body = bytes.slice(6);
+  if (WQ_DEFLATE.crc16(body) !== crc) throw new Error('realm: CRC mismatch');
+  var json = wqUtf8Dec(flags & 1 ? WQ_DEFLATE.inflate(body) : body);
+  var obj = JSON.parse(json);
+  var r = obj && obj.v === 1 ? sanitizeRealm(obj.realm) : null;
+  if (!r) throw new Error('realm: bad body');
+  return r;
+}
+function realmBuildCode(realm) {
+  return REALM_TEXT_PREFIX + wqB64Enc(realmBuildPayload(realm));
+}
+/* 词境码文本 -> payload（接受：RM.xxx 原文 / 含 #m=i/n.xxx 的链接 / i=n 单分片） */
+function realmTextToPayload(text) {
+  var t = (text || '').trim();
+  if (!t) throw new Error('realm: empty');
+  var m = /#m=([0-9]{1,3})\/([0-9]{1,3})\.([A-Za-z0-9_-]+)/.exec(t);
+  if (m) {
+    if (m[2] !== '1' || m[1] !== '1') return { needShards: parseInt(m[2], 10) };
+    return wqB64Dec(m[3]);
+  }
+  if (t.indexOf(REALM_TEXT_PREFIX) === 0) return wqB64Dec(t.slice(REALM_TEXT_PREFIX.length));
+  var m2 = /^([0-9]{1,3})\/([0-9]{1,3})\.([A-Za-z0-9_-]+)$/.exec(t);
+  if (m2) {
+    if (m2[2] !== '1' || m2[1] !== '1') return { needShards: parseInt(m2[2], 10) };
+    return wqB64Dec(m2[3]);
+  }
+  throw new Error('realm: unrecognized text');
+}
+
+/* ---------- 分片收集（同接力码：localStorage 暂存 30 分钟，集齐按序拼接+CRC 整包校验） ---------- */
+function realmPartsLoad() {
+  try {
+    var v = JSON.parse(localStorage.getItem(REALM_PARTS_KEY) || 'null');
+    if (v && typeof v.n === 'number' && v.parts && typeof v.parts === 'object') {
+      if (v.t && Date.now() - v.t > 30 * 60000) return { n: 0, parts: {} };
+      return v;
+    }
+  } catch (e) {}
+  return { n: 0, parts: {} };
+}
+function realmPartsSave(p) {
+  try { p.t = Date.now(); localStorage.setItem(REALM_PARTS_KEY, JSON.stringify(p)); } catch (e) {}
+}
+function realmPartsClear() { try { localStorage.removeItem(REALM_PARTS_KEY); } catch (e) {} }
+function realmAcceptShard(i, n, b64) {
+  if (!n || n < 1 || n > 99 || !i || i < 1 || i > n) throw new Error('realm: bad shard header');
+  wqB64Dec(b64);   /* 严格解码即校验本片完整性 */
+  var st = realmPartsLoad();
+  if (st.n !== n) st = { n: n, parts: {} };
+  st.parts[i] = b64;
+  realmPartsSave(st);
+  var got = Object.keys(st.parts).length;
+  if (got < n) return { done: false, got: got, n: n };
+  var all = [];
+  for (var k = 1; k <= n; k++) {
+    var part = st.parts[k];
+    if (!part) return { done: false, got: got - 1, n: n };
+    all = all.concat(wqB64Dec(part));
+  }
+  var realm = realmParsePayload(all);   /* 整包 CRC 在此把关 */
+  realmPartsClear();
+  return { done: true, realm: realm };
+}
+/* hash 到货（#m=i/n.<b64>）：扫码打开即收片，集齐弹确认框 */
+function realmCheckHash() {
+  var m = /#m=([0-9]{1,3})\/([0-9]{1,3})\.([A-Za-z0-9_-]+)/.exec(location.hash || '');
+  if (!m) return false;
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  try {
+    var res = realmAcceptShard(parseInt(m[1], 10), parseInt(m[2], 10), m[3]);
+    if (res.done) { openRealm(); realmShowConfirm(res.realm); return true; }
+    openRealm();
+    $('realm-parts-note').textContent = '已收到词境码第 ' + m[1] + '/' + m[2] + ' 片 · 共收集 ' + res.got + '/' + res.n +
+      ' 片——请继续扫下一张（进度已暂存，中途刷新不丢）';
+    return true;
+  } catch (e) {
+    openRealm();
+    $('realm-parts-note').textContent = '词境码解析失败：' + (e && e.message);
+    return true;
+  }
+}
+
+/* ---------- 我的词境（localStorage，坏档自愈） ---------- */
+function loadRealms() {
+  var out = [];
+  try {
+    var raw = JSON.parse(localStorage.getItem(REALMS_KEY) || '[]');
+    if (raw instanceof Array) {
+      raw.forEach(function (e, i) {
+        var r = (e && typeof e === 'object' && !(e instanceof Array)) ? sanitizeRealm(e.realm) : null;
+        if (r) out.push({ id: typeof e.id === 'string' && e.id ? e.id : ('r' + (i + 1)), realm: r, t: intOr(e.t, 0, 0, 8.64e15) });
+      });
+    }
+  } catch (e) { out = []; }   /* 整包损坏：当作空列表（自愈），不炸启动 */
+  return out.slice(0, 20);
+}
+function saveRealms(list) {
+  try { localStorage.setItem(REALMS_KEY, JSON.stringify(list.slice(0, 20))); } catch (e) {}
+}
+
+/* ---------- 工坊界面 ---------- */
+var realmUi = { shards: null, n: 1, page: 1, baseLen: 0, incoming: null };
+var realmDraft = { mods: [] };   /* {mods:[], castle, monhp, time, intro}，词源每次实时收集 */
+
+function realmSrcOptions() {
+  if (!REALM_SRC_PACKS) {
+    REALM_SRC_PACKS = PACKS.map(function (p) { return { id: 'pack:' + p.id, label: p.icon + ' ' + p.name }; });
+    REALM_SRC_PACKS.push({ id: 'wrong', label: '📕 错题本（' + Object.keys(save.wrongBook || {}).length + ' 词）' });
+  }
+  return REALM_SRC_PACKS;
+}
+/* 自定义词表解析：每行一词（词与释义用空格/冒号/制表符分隔均可），必须命中内置词典 */
+function realmParseCustom(text) {
+  var out = [], bad = [], seen = {};
+  String(text || '').split(/\r?\n/).forEach(function (line) {
+    var w = line.trim().split(/[\s:：,，;；\t]+/)[0] || '';
+    w = w.toLowerCase().replace(/[^a-z'-]/g, '');
+    if (!w) return;
+    if (ENC_INDEX[w] === undefined) { if (bad.indexOf(w) < 0 && bad.length < 8) bad.push(w); return; }
+    if (!seen[w]) { seen[w] = 1; out.push(w); }
+  });
+  return { words: out, bad: bad };
+}
+/* 词源勾选 -> 确定性抽样补足（同一组勾选恒出同一份词表，词境码可复现） */
+function realmSampleSources(ids, need) {
+  var pool = [], seen = {};
+  ids.forEach(function (id) {
+    if (id === 'wrong') {
+      Object.keys(save.wrongBook || {}).forEach(function (w) {
+        if (!seen[w] && ENC_INDEX[w] !== undefined) { seen[w] = 1; pool.push(w); }
+      });
+      return;
+    }
+    var p = packById(id.slice(5));
+    if (!p) return;
+    packWords(p).forEach(function (x) {
+      if (!seen[x.w] && ENC_INDEX[x.w] !== undefined) { seen[x.w] = 1; pool.push(x.w); }
+    });
+  });
+  var seed = 0;
+  ids.slice().sort().forEach(function (s) { seed = ((seed * 31 + hashStr(s)) | 0) >>> 0; });
+  seededShuffle(pool, mulberry32(seed || 1));
+  return pool.slice(0, need);
+}
+/* 收集当前草稿的完整词表：自定义词优先，来源勾选确定性补足到 30 */
+function realmCollectDraft() {
+  var srcIds = [];
+  document.querySelectorAll('#realm-src-list input[type=checkbox]').forEach(function (cb) {
+    if (cb.checked) srcIds.push(cb.getAttribute('data-src'));
+  });
+  var custom = realmParseCustom($('realm-custom-text').value);
+  var words = custom.words.slice(0, REALM_MAX_WORDS);
+  if (words.length < REALM_MAX_WORDS && srcIds.length) {
+    realmSampleSources(srcIds, REALM_MAX_WORDS - words.length).forEach(function (w) {
+      if (words.indexOf(w) < 0 && words.length < REALM_MAX_WORDS) words.push(w);
+    });
+  }
+  return { words: words, srcIds: srcIds, customBad: custom.bad, customN: custom.words.length };
+}
+function realmDraftPreview() {
+  var d = realmCollectDraft();
+  var bits = [];
+  if (d.customN) bits.push('自定义 ' + d.customN + ' 词');
+  if (d.srcIds.length) bits.push('来源勾选 ' + d.srcIds.length + ' 项');
+  var head = d.words.length ? ('当前词表 ' + d.words.length + ' 词（' + bits.join(' + ') + '）：' +
+    d.words.slice(0, 10).join(', ') + (d.words.length > 10 ? ' …' : '')) : '尚未选够词（至少 4 词）';
+  if (d.customBad.length) head += '；⚠️ 不在词典的行已忽略：' + d.customBad.join(', ');
+  return head;
+}
+function realmDraftBuild() {
+  var d = realmCollectDraft();
+  if (d.words.length < 4) { toast('词境至少需要 4 个有效词（' + d.words.length + ' 个）——勾选词源或粘贴自定义词表'); return null; }
+  var r = sanitizeRealm({
+    words: d.words,
+    mods: realmDraft.mods,
+    castle: parseFloat($('realm-castle').value),
+    monhp: parseFloat($('realm-monhp').value),
+    time: parseFloat($('realm-time').value),
+    intro: $('realm-intro').value,
+    t: Date.now()
+  });
+  if (!r) { toast('词境参数无效'); return null; }
+  return r;
+}
+function realmSummaryHtml(r) {
+  var mods = r.mods.length ? r.mods.map(function (id) { return BOSS_MODS[id].icon + BOSS_MODS[id].name; }).join(' + ') : '无词缀';
+  return '📚 词量 ' + r.words.length + ' · ⚠️ ' + mods +
+    ' · 🏰 城防×' + r.castle + ' 👾 怪血×' + r.monhp + ' ⏱ 时限×' + r.time +
+    (r.intro ? '<br>💬 「' + realmEsc(r.intro) + '」' : '');
+}
+function renderRealmSrc() {
+  var wrap = $('realm-src-list');
+  var html = '';
+  realmSrcOptions().forEach(function (o) {
+    var cnt = '';
+    if (o.id === 'wrong') {
+      var n = Object.keys(save.wrongBook || {}).length;
+      cnt = n + ' 词';
+    } else {
+      var p = packById(o.id.slice(5));
+      cnt = p ? (packWords(p).length + ' 词') : '';
+    }
+    html += '<label class="list-opt realm-src-opt"><input type="checkbox" data-src="' + o.id + '">' +
+      '<div><div class="lst-name">' + o.label + '</div>' + (cnt ? '<div class="lst-sub">' + cnt + '</div>' : '') + '</div></label>';
+  });
+  wrap.innerHTML = html;
+}
+function renderRealmMods() {
+  var wrap = $('realm-mod-list');
+  var html = '';
+  Object.keys(BOSS_MODS).forEach(function (id) {
+    var m = BOSS_MODS[id];
+    var on = realmDraft.mods.indexOf(id) >= 0;
+    html += '<button class="btn btn-tiny realm-mod-chip' + (on ? ' on' : '') + '" data-mod="' + id +
+      '" title="' + realmEsc(m.desc) + '">' + m.icon + ' ' + m.name + '</button>';
+  });
+  wrap.innerHTML = html;
+  $('realm-mod-note').textContent = '已选 ' + realmDraft.mods.length + '/2 条词缀';
+}
+function renderRealmList() {
+  var list = loadRealms();
+  var wrap = $('realm-saved-list');
+  if (!list.length) {
+    wrap.innerHTML = '<p class="hint">还没有保存的词境——完成三步构建后点「💾 保存到我的词境」。</p>';
+    return;
+  }
+  var html = '';
+  list.forEach(function (e, i) {
+    html += '<div class="realm-saved-row"><div class="realm-saved-info"><b>🌌 词境 #' + (list.length - i) +
+      '</b><small>' + (e.t ? new Date(e.t).toLocaleDateString() : '') + '</small>' +
+      '<div class="realm-saved-sum">' + realmSummaryHtml(e.realm) + '</div></div>' +
+      '<div class="realm-saved-acts">' +
+      '<button class="btn btn-tiny btn-primary" data-realm-play="' + e.id + '">▶ 重玩</button>' +
+      '<button class="btn btn-tiny" data-realm-share="' + e.id + '">📤 分享</button>' +
+      '<button class="btn btn-tiny danger" data-realm-del="' + e.id + '">🗑️</button>' +
+      '</div></div>';
+  });
+  wrap.innerHTML = html;
+}
+function openRealm() {
+  if (!buildEnc()) { showLoadFail(); return; }
+  showScreen('scr-realm');
+  realmUi.incoming = null;
+  realmUi.shards = null;
+  $('realm-share').hidden = true;
+  $('realm-confirm').hidden = true;
+  $('realm-in-text').value = '';
+  $('realm-parts-note').textContent = '';
+  $('realm-src-note').textContent = realmDraftPreview();
+  renderRealmSrc();
+  renderRealmMods();
+  renderRealmList();
+}
+
+/* ---------- 生成 / 分享（复用接力码分片与二维码绘制） ---------- */
+function realmGenerate() {
+  try {
+    var r = realmDraftBuild();
+    if (!r) return;
+    if (!relayQrAvailable()) { toast('二维码库未加载（libs/qrcode.min.js），仍可复制文本词境码'); }
+    realmShowShare(r);
+  } catch (e) {
+    noteError('realmGenerate', e);
+    try { toast('词境码生成失败：' + (e && e.message)); } catch (x) {}
+  }
+}
+function realmShowShare(r) {
+  var payload = realmBuildPayload(r);
+  realmUi.baseLen = relayBaseUrlLen();
+  var plan = relayPlanShards(payload, realmUi.baseLen);   /* 复用接力码分片规划（超长自动分片） */
+  realmUi.shards = plan.shards;
+  realmUi.n = plan.n;
+  realmUi.page = 1;
+  $('realm-share').hidden = false;
+  $('realm-share-sum').innerHTML = realmSummaryHtml(r);
+  $('realm-text').value = realmBuildCode(r);
+  var qrWrap = $('realm-qr-wrap');
+  if (relayQrAvailable()) {
+    qrWrap.hidden = false;
+    realmShowPage();
+  } else {
+    qrWrap.hidden = true;
+  }
+  try { $('realm-share').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+  toast('🌌 词境码已生成' + (plan.n > 1 ? '（超长自动分片：共 ' + plan.n + ' 张码）' : '（单码承载）') + '，复制文本或扫码分享');
+}
+function realmShowPage() {
+  var i = realmUi.page;
+  var url = location.origin + location.pathname + '#m=' + i + '/' + realmUi.n + '.' + realmUi.shards[i - 1];
+  drawQrTo($('realm-qr'), url, 260);
+  $('realm-page-info').textContent = '第 ' + i + '/' + realmUi.n + ' 片';
+}
+
+/* ---------- 粘贴 / 扫码 -> 摘要确认 -> 开战 ---------- */
+function realmRestorePaste() {
+  try {
+    var payload = realmTextToPayload($('realm-in-text').value);
+    if (payload && payload.needShards) {
+      toast('这是 ' + payload.needShards + ' 片分片词境码：请按顺序逐张扫码（或粘贴完整 RM. 文本）');
+      return;
+    }
+    realmShowConfirm(realmParsePayload(payload));
+  } catch (e) {
+    toast('词境码无效：' + (e && e.message));
+  }
+}
+function realmShowConfirm(r) {
+  openRealm();
+  realmUi.incoming = r;
+  $('realm-confirm').hidden = false;
+  $('realm-confirm-body').innerHTML = '<div class="realm-warn">📥 收到词境</div>' +
+    '<div class="realm-sum-box">' + realmSummaryHtml(r) + '</div>' +
+    '<p class="hint">开战将严格按词境词表与参数出题（词缀照常生效），学习进度与间隔重复照常写回。</p>';
+  try { $('realm-confirm').scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (e) {}
+}
+
+/* ---------- 开战：显式词池 + 词缀注入（复用投毒管线） ---------- */
+function startRealmBattle(realm) {
+  var r = sanitizeRealm(realm);
+  if (!r) { toast('词境数据无效'); return; }
+  var pool = [];
+  r.words.forEach(function (w) {
+    var m = meaningOfAny(w);
+    if (m && !pool.some(function (x) { return x.w === w; })) pool.push({ w: w, m: m });
+  });
+  if (pool.length < 4) { toast('词境词量不足，无法开战'); return; }
+  var ids = (save.lastLists || []).filter(function (id) { return !!listById(id); });
+  if (!ids.length) ids = ['cet4'];
+  startRun('adventure', ids, 'normal', pool);   /* 显式词池（同投毒通道），SRS 照常写回 */
+  run.realm = r;
+  run.stageSize = pool.length;   /* 单一词境一战定胜负 */
+  run.unitCtx = null;
+  run.unitSet = null;
+  r.mods.forEach(markModSeen);   /* 词缀图鉴：词境遭遇也记账 */
+  updateHUD();
+  var modTxt = r.mods.length ? ('⚠️ ' + r.mods.map(function (id) {
+    var m = BOSS_MODS[id];
+    return m.icon + ' ' + m.name + '：' + m.desc;
+  }).join('　')) : '';
+  showBanner('🌌 词境开启', (r.intro ? '💬 ' + realmEsc(r.intro) + '<br>' : '') +
+    '词量 ' + pool.length + ' · 🏰 城防×' + r.castle + ' · 👾 怪血×' + r.monhp + ' · ⏱ 时限×' + r.time +
+    (modTxt ? '<br>' + modTxt : ''),
+    function () { nextMonster(); }, 2600);
+}
+
+/* ---------- 词境屏事件绑定 ---------- */
+function realmBind() {
+  $('btn-realm-back').onclick = function () { showScreen('scr-home'); refreshHome(); };
+  $('realm-src-list').addEventListener('change', function () {
+    $('realm-src-note').textContent = realmDraftPreview();
+  });
+  $('realm-custom-text').addEventListener('input', function () {
+    $('realm-src-note').textContent = realmDraftPreview();
+  });
+  $('realm-mod-list').addEventListener('click', function (e) {
+    var b = e.target.closest('.realm-mod-chip');
+    if (!b) return;
+    var id = b.getAttribute('data-mod');
+    var i = realmDraft.mods.indexOf(id);
+    if (i >= 0) realmDraft.mods.splice(i, 1);
+    else if (realmDraft.mods.length >= 2) { toast('词缀最多选 2 条，先取消一条再选'); return; }
+    else realmDraft.mods.push(id);
+    renderRealmMods();
+  });
+  [['realm-castle', 'realm-castle-val'], ['realm-monhp', 'realm-monhp-val'], ['realm-time', 'realm-time-val']]
+    .forEach(function (pair) {
+      var input = $(pair[0]), val = $(pair[1]);
+      var sync = function () { val.textContent = '×' + parseFloat(input.value).toFixed(1); };
+      input.addEventListener('input', sync);
+      sync();
+    });
+  $('realm-intro').addEventListener('input', function () {
+    if (this.value.length > 50) this.value = this.value.slice(0, 50);
+    $('realm-intro-count').textContent = this.value.length + '/50';
+  });
+  $('btn-realm-save').onclick = function () {
+    var r = realmDraftBuild();
+    if (!r) return;
+    var list = loadRealms();
+    list.unshift({ id: 'r' + Date.now().toString(36) + Math.floor(Math.random() * 1000), realm: r, t: Date.now() });
+    saveRealms(list);
+    renderRealmList();
+    toast('💾 词境已保存到「我的词境」');
+  };
+  $('btn-realm-gen').onclick = realmGenerate;
+  $('btn-realm-play').onclick = function () {
+    var r = realmDraftBuild();
+    if (!r) return;
+    startRealmBattle(r);
+  };
+  $('btn-realm-copy').onclick = function () {
+    var ta = $('realm-text');
+    ta.focus(); ta.select();
+    try { document.execCommand('copy'); toast('已复制完整词境码文本'); } catch (e) { toast('请手动全选复制'); }
+  };
+  $('btn-realm-prev').onclick = function () {
+    if (!realmUi.shards) return;
+    realmUi.page = realmUi.page <= 1 ? realmUi.n : realmUi.page - 1;
+    realmShowPage();
+  };
+  $('btn-realm-next').onclick = function () {
+    if (!realmUi.shards) return;
+    realmUi.page = realmUi.page >= realmUi.n ? 1 : realmUi.page + 1;
+    realmShowPage();
+  };
+  $('btn-realm-parse').onclick = realmRestorePaste;
+  $('btn-realm-confirm-cancel').onclick = function () {
+    realmUi.incoming = null;
+    $('realm-confirm').hidden = true;
+  };
+  $('btn-realm-confirm-play').onclick = function () {
+    var r = realmUi.incoming;
+    realmUi.incoming = null;
+    $('realm-confirm').hidden = true;
+    if (r) startRealmBattle(r);
+  };
+  /* 我的词境列表：重玩 / 分享 / 删除（事件委托） */
+  $('realm-saved-list').addEventListener('click', function (e) {
+    var play = e.target.closest('[data-realm-play]');
+    if (play) {
+      var hit = loadRealms().filter(function (x) { return x.id === play.getAttribute('data-realm-play'); })[0];
+      if (hit) startRealmBattle(hit.realm);
+      return;
+    }
+    var share = e.target.closest('[data-realm-share]');
+    if (share) {
+      var hit2 = loadRealms().filter(function (x) { return x.id === share.getAttribute('data-realm-share'); })[0];
+      if (hit2) realmShowShare(hit2.realm);
+      return;
+    }
+    var del = e.target.closest('[data-realm-del]');
+    if (del) {
+      var id = del.getAttribute('data-realm-del');
+      if (!confirm('删除这个词境？（不影响学习进度）')) return;
+      saveRealms(loadRealms().filter(function (x) { return x.id !== id; }));
+      renderRealmList();
+    }
+  });
 }
 
 /* ========================= 分享卡（离屏 canvas 战报合成） =========================
@@ -6827,7 +7625,8 @@ function init() {
   showScreen('scr-home');
   startWatchdog();
   relayCheckHash();          /* 带接力码 hash 打开：收片/恢复流程（#r=i/n.<b64>） */
-  relayResumeAfterReload();  /* 恢复存档后若带有对局快照，询问续接（run 级接力第二层） */
+  realmCheckHash();          /* 带词境码 hash 打开：收片/确认开战流程（#m=i/n.<b64>） */
+  relayResumeAfterReload();  /* 恢复存档后若带有对局快照，按勾选自动续接（run 级接力第二层） */
   if (!wordsOk) showLoadFail();   /* 词库加载失败：给可恢复提示，而不是无声死页 */
   /* PWA：本地服务 / https 下注册离线缓存（双击 file:// 打开时自动跳过）。
      updateViaCache:'none'：SW 脚本的更新检查绕过 HTTP 缓存——否则 sw.js 自身被

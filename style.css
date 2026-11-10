@@ -1446,3 +1446,93 @@ a.btn { text-decoration: none; display: inline-block; }
 }
 #relay-overlay .memcard-box, #share-overlay .memcard-box { max-height: none; }
 #relay-overlay .memcard-box { margin: 12px auto; }
+
+/* ============ 词境工坊（玩家自制关卡 UGC） ============ */
+.realm-src-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.realm-src-list .list-opt { margin: 0; }
+#realm-custom-text, #realm-in-text, #realm-text {
+  width: 100%; min-height: 64px;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.2);
+  border-radius: 12px;
+  color: #cfe9ff; font-family: Consolas, monospace; font-size: 12px;
+  padding: 10px; margin: 8px 0 4px;
+  resize: vertical; outline: none;
+}
+#realm-in-text { min-height: 80px; }
+.realm-mods { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0; }
+.realm-mod-chip {
+  border: 1.5px solid rgba(255,255,255,.22);
+  background: rgba(255,255,255,.06);
+  color: var(--c-sub);
+}
+.realm-mod-chip.on {
+  border-color: var(--c-accent);
+  background: rgba(124,92,255,.22);
+  color: var(--c-accent);
+  font-weight: 800;
+}
+.realm-param-row {
+  display: flex; align-items: center; gap: 10px;
+  margin: 10px 0;
+}
+.realm-param-label { flex: 0 0 86px; font-size: 13px; color: var(--c-sub); }
+.realm-param-row input[type=range] { flex: 1; accent-color: var(--c-primary); min-width: 0; }
+.realm-param-val { flex: 0 0 52px; text-align: right; color: var(--c-accent); font-size: 14px; }
+#realm-intro { max-width: 100%; }
+.realm-sum-box {
+  background: rgba(124,92,255,.1);
+  border: 1px solid rgba(124,92,255,.4);
+  border-radius: 12px;
+  padding: 10px 12px; margin: 8px 0;
+  font-size: 13px; line-height: 1.7; text-align: left;
+}
+.realm-warn {
+  font-size: 15px; font-weight: 800; color: var(--c-accent);
+  margin: 4px 0;
+}
+.realm-saved-row {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 12px;
+  padding: 10px 12px; margin: 8px 0;
+}
+.realm-saved-info { flex: 1; min-width: 0; text-align: left; font-size: 13px; }
+.realm-saved-info small { color: var(--c-sub); margin-left: 6px; }
+.realm-saved-sum { color: var(--c-sub); font-size: 12px; line-height: 1.6; margin-top: 3px; }
+.realm-saved-acts { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+@media (max-width: 480px) {
+  .realm-src-list { grid-template-columns: 1fr; }
+  .realm-saved-acts { flex-direction: row; }
+}
+
+/* ============ 听写挑战 · 口语跟读（说出来才算学会） ============ */
+.q-speak {
+  text-align: center;
+  padding: 8px 4px 4px;
+}
+.speak-mic {
+  font-size: 17px;
+  padding: 14px 30px;
+  border-radius: 16px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.speak-mic.listening {
+  background: var(--c-bad);
+  animation: speakPulse 1s ease-in-out infinite;
+}
+@keyframes speakPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+.speak-status {
+  font-size: 13px;
+  color: var(--c-sub);
+  line-height: 1.7;
+  margin-top: 10px;
+}
+.speak-status .heard { color: var(--c-accent); font-weight: 800; }
+.speak-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
