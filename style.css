@@ -12,10 +12,23 @@
   --c-sub: #a9a3d6;
   --c-accent: #ffd166;
   --c-primary: #7c5cff;
+  --c-primary-lt: #9d7dff;
   --c-primary-dk: #5b3fd6;
   --c-good: #3ddc84;
   --c-bad: #ff5d73;
   --c-shadow: rgba(0,0,0,.35);
+
+  /* ===== 视觉常量（优雅轮收敛）：圆角 / 间距 / 主色统一从这里取，勿再散落硬编码 =====
+     圆角四档：--r-lg 面板/大卡 20px · --r-md 按钮/条目 14px · --r-sm 小件/输入框 10px · --r-pill 胶囊
+     间距四档：--sp-1 6px（紧凑内距）· --sp-2 10px（控件间隙）· --sp-3 14px（区块间隙）· --sp-4 20px（面板内距） */
+  --r-lg: 20px;
+  --r-md: 14px;
+  --r-sm: 10px;
+  --r-pill: 999px;
+  --sp-1: 6px;
+  --sp-2: 10px;
+  --sp-3: 14px;
+  --sp-4: 20px;
 }
 
 html, body { height: 100%; }
@@ -66,8 +79,8 @@ body {
 .btn {
   font-family: inherit;
   border: none; cursor: pointer;
-  border-radius: 14px;
-  padding: 12px 20px;
+  border-radius: var(--r-md);
+  padding: 12px var(--sp-4);
   font-size: 17px; font-weight: 700;
   color: var(--c-text);
   background: linear-gradient(180deg, var(--c-panel2), var(--c-panel));
@@ -77,19 +90,50 @@ body {
 }
 .btn:active { transform: translateY(3px) scale(.98); box-shadow: 0 1px 0 var(--c-shadow); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
-.btn-primary { background: linear-gradient(180deg, #9d7dff, var(--c-primary-dk)); }
+.btn-primary { background: linear-gradient(180deg, var(--c-primary-lt), var(--c-primary-dk)); }
 .btn-big {
   display: block; width: 100%;
-  padding: 16px 20px; font-size: 20px;
+  padding: 16px var(--sp-4); font-size: 20px;
   display: flex; flex-direction: column; gap: 2px; align-items: center;
 }
 .btn-big small { font-size: 12px; font-weight: 400; color: var(--c-sub); }
-.btn-small { padding: 10px 16px; font-size: 15px; border-radius: 12px; }
-.btn-tiny { padding: 7px 12px; font-size: 14px; border-radius: 10px; }
+.btn-small { padding: 10px 16px; font-size: 15px; border-radius: var(--r-md); }
+.btn-tiny { padding: 7px 12px; font-size: 14px; border-radius: var(--r-sm); }
 .btn.danger { background: linear-gradient(180deg, #ff7285, #c43048); }
 
-.menu { display: flex; flex-direction: column; gap: 12px; }
-.menu-row { display: flex; gap: 10px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
+.menu-row { display: flex; gap: var(--sp-2); justify-content: center; margin-top: 18px; flex-wrap: wrap; }
+
+/* ---------- 主菜单分组（玩家旅程四组） ----------
+   组内按钮同源样式与尺寸（menu-group-body 统一竖排 btn-big）；
+   组与组之间用虚线细分隔，小节标题 + 一句副标。 */
+.menu-groups { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: 4px; }
+.menu-group { border-top: 1px dashed rgba(255,255,255,.14); padding-top: var(--sp-3); }
+.menu-group-first { border-top: none; padding-top: 0; }
+.menu-group-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  margin-bottom: 8px; padding: 0 2px;
+}
+.mg-title { font-size: 15px; font-weight: 800; color: var(--c-accent); letter-spacing: 1px; white-space: nowrap; }
+.mg-sub { font-size: 11px; color: var(--c-sub); text-align: right; min-width: 0; }
+.menu-group-body { display: flex; flex-direction: column; gap: var(--sp-2); }
+
+/* ---------- 新玩家引导条（firstRun） ---------- */
+.guide-bar {
+  display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;
+  width: 100%;
+  font-family: inherit; cursor: pointer;
+  background: linear-gradient(135deg, rgba(124,92,255,.35), rgba(255,209,102,.18));
+  border: 1px solid rgba(255,209,102,.6);
+  border-radius: var(--r-md);
+  padding: 10px var(--sp-3); margin-bottom: 12px;
+  color: var(--c-text); font-size: 14px;
+  animation: guidePulse 2s ease-in-out infinite;
+}
+.guide-bar b { color: var(--c-accent); }
+@keyframes guidePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,209,102,.35); }
+  50% { box-shadow: 0 0 0 6px rgba(255,209,102,0); }
+}
 
 /* ---------- 主菜单 ---------- */
 #scr-home { justify-content: center; align-items: center; position: relative; z-index: 1; }
@@ -116,8 +160,8 @@ body {
   position: relative; z-index: 1;
   background: linear-gradient(180deg, rgba(46,38,104,.92), rgba(30,25,70,.95));
   border: 1px solid rgba(255,255,255,.12);
-  border-radius: 20px;
-  padding: 20px;
+  border-radius: var(--r-lg);
+  padding: var(--sp-4);
   margin: auto; width: 100%; max-width: 520px;
   box-shadow: 0 20px 60px rgba(0,0,0,.5);
 }
@@ -155,7 +199,7 @@ body {
 }
 .diff-opt input:checked + span { border-color: var(--c-accent); background: rgba(255,209,102,.12); }
 .diff-opt small { font-weight: 400; font-size: 11px; color: var(--c-sub); }
-.setup-actions { display: flex; gap: 10px; margin-top: 20px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.setup-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-4); align-items: center; justify-content: center; flex-wrap: wrap; }
 
 /* ---------- 战斗页 ---------- */
 #scr-battle { position: relative; z-index: 1; gap: 10px; padding: 12px; }
@@ -256,7 +300,7 @@ body {
   position: relative; z-index: 2;
   background: linear-gradient(180deg, rgba(46,38,104,.95), rgba(28,23,64,.98));
   border: 1px solid rgba(255,255,255,.14);
-  border-radius: 18px; padding: 16px 14px;
+  border-radius: var(--r-lg); padding: 16px 14px;
   box-shadow: 0 14px 40px rgba(0,0,0,.45);
 }
 .q-card.shake { animation: cardShake .4s ease; }
@@ -387,7 +431,7 @@ body {
 .memcard-box {
   background: linear-gradient(180deg, #3a2f86, #241d55);
   border: 2px solid var(--c-accent);
-  border-radius: 22px;
+  border-radius: var(--r-lg);
   padding: 26px 24px;
   max-width: 400px; width: 100%;
   text-align: center;
@@ -432,14 +476,17 @@ body {
 .shop-item .btn { width: 100%; padding: 8px; font-size: 14px; }
 .shop-item.maxed { opacity: .6; }
 
-/* ---------- 结算 ---------- */
+/* ---------- 结算页同源布局（七种：冒险/毒池/远征/肉鸽/词境/听写共用 scr-result；
+   热座对决在 scr-duel 内复用同一组布局类）----------
+   结构统一为：标题（panel-title / duel-verdict）→ 核心数据（result-stats）→
+   回顾（result-canvas / result-words，按局可省）→ 按钮区（setup-actions）。 */
 .result-stats {
   display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 6px 0 4px;
 }
 .result-stats .chip { font-size: 14px; }
 .result-words {
   max-height: 300px; overflow-y: auto;
-  background: rgba(0,0,0,.25); border-radius: 14px; padding: 8px;
+  background: rgba(0,0,0,.25); border-radius: var(--r-md); padding: 8px;
 }
 .rw-row {
   display: flex; align-items: center; gap: 10px;
@@ -464,7 +511,7 @@ body {
 }
 #codex-search:focus { border-color: var(--c-primary); }
 .filter-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
-.filter.active { background: linear-gradient(180deg, #9d7dff, var(--c-primary-dk)); }
+.filter.active { background: linear-gradient(180deg, var(--c-primary-lt), var(--c-primary-dk)); }
 .codex-list { max-height: 320px; overflow-y: auto; background: rgba(0,0,0,.25); border-radius: 14px; padding: 6px; }
 .cx-row {
   display: flex; align-items: center; gap: 10px;
@@ -635,7 +682,7 @@ body {
 }
 .xp-fill {
   height: 100%;
-  background: linear-gradient(90deg, #7ce8ff, #7c5cff);
+  background: linear-gradient(90deg, #7ce8ff, var(--c-primary));
   border-radius: 999px;
   transition: width .3s ease;
 }
@@ -730,7 +777,7 @@ body {
   width: 100%; min-height: 180px;
   background: rgba(0,0,0,.35);
   border: 1px solid rgba(255,255,255,.2);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   color: #cfe9ff; font-family: Consolas, monospace; font-size: 11px;
   padding: 10px; margin: 12px 0;
   resize: vertical; outline: none;
@@ -1209,7 +1256,7 @@ a.btn { text-decoration: none; display: inline-block; }
   display: block;
   background: rgba(0,0,0,.25);
   border: 1px solid rgba(255,255,255,.1);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   margin: 8px 0 2px;
 }
 
@@ -1362,7 +1409,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .dp-face { font-size: 28px; }
 .duel-vs { font-weight: 800; color: var(--c-sub); }
 .duel-verdict { font-size: 22px; font-weight: 800; text-align: center; margin-bottom: 10px; }
-.duel-result-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 10px; }
+/* 热座对决核心数据复用 .result-stats（结算页同源布局），不再单独定义 chips 容器 */
 @media (max-width: 480px) {
   .duel-side { flex-direction: column; gap: 2px; padding: 8px 10px; text-align: center; }
   .ds-combo { min-width: 0; }
@@ -1382,7 +1429,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .relay-qr {
   image-rendering: pixelated;
   background: #fdfcff;
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   margin: 8px auto 4px;
   display: block;
   max-width: 100%;
@@ -1396,7 +1443,7 @@ a.btn { text-decoration: none; display: inline-block; }
   width: 100%; min-height: 64px;
   background: rgba(0,0,0,.35);
   border: 1px solid rgba(255,255,255,.2);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   color: #cfe9ff; font-family: Consolas, monospace; font-size: 11px;
   padding: 10px; margin: 8px 0;
   resize: vertical; outline: none;
@@ -1406,7 +1453,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .relay-backup {
   background: rgba(61,220,132,.08);
   border: 1px solid rgba(61,220,132,.35);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   padding: 10px 12px; margin: 10px 0;
 }
 .relay-backup .io-log-title { color: var(--c-good); }
@@ -1414,7 +1461,7 @@ a.btn { text-decoration: none; display: inline-block; }
   font-size: 13px; line-height: 1.7; color: var(--c-text);
   background: rgba(255,93,115,.1);
   border: 1px solid rgba(255,93,115,.4);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   padding: 10px 12px; margin: 8px 0 12px;
   text-align: left;
 }
@@ -1425,7 +1472,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .share-box { max-width: 360px; }
 .share-img {
   width: 100%; max-width: 300px;
-  border-radius: 14px;
+  border-radius: var(--r-md);
   border: 2px solid rgba(255,255,255,.15);
   margin: 12px auto; display: block;
 }
@@ -1454,7 +1501,7 @@ a.btn { text-decoration: none; display: inline-block; }
   width: 100%; min-height: 64px;
   background: rgba(0,0,0,.35);
   border: 1px solid rgba(255,255,255,.2);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   color: #cfe9ff; font-family: Consolas, monospace; font-size: 12px;
   padding: 10px; margin: 8px 0 4px;
   resize: vertical; outline: none;
@@ -1483,7 +1530,7 @@ a.btn { text-decoration: none; display: inline-block; }
 .realm-sum-box {
   background: rgba(124,92,255,.1);
   border: 1px solid rgba(124,92,255,.4);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   padding: 10px 12px; margin: 8px 0;
   font-size: 13px; line-height: 1.7; text-align: left;
 }
