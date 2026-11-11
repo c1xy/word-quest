@@ -38,7 +38,7 @@ function defaultSave() {
     pets: {},
     pet: '',
     stats: { kills: 0, bosses: 0, spellOk: 0, listenOk: 0, runs: 0, dailyDone: 0, maxCombo: 0, perfects: 0, packDone: 0,
-      labN: 0, labOk: 0, expWins: 0, packDoneMap: {} },   /* 词根实验室 / 每日远征 / 各主题包完成档案 */
+      labN: 0, labOk: 0, expWins: 0, packDoneMap: {} },   /* 词根合成实验室 / 每日远征 / 各主题挑战包完成档案 */
     expedition: { date: '', best: 0, clearDate: '' },   /* 每日远征：当日最高分与首通日期 */
     modsSeen: {},         /* 已遭遇过的 BOSS 词缀档案（成就「词缀图鉴」） */
     plan: { target: 10 },
@@ -57,7 +57,8 @@ function defaultSave() {
     poisonLog: [],       // 投毒战绩（谁毒倒了谁）：{ role:'set'|'play', words, cleared, total, win, pending?, t }
     poisonIssued: null,  // 最近一次发出的挑战码内容，用于核对回贴的成绩码
     rogue: { runs: 0, wins: 0, bestChain: 0, cursesSeen: {} },  // 词魂肉鸽档案（出征/加冕/最高连锁/遭遇过的诅咒）
-    duel: { plays: 0, p1wins: 0, p2wins: 0 }                    // 双人对决战绩（红队/蓝队胜负）
+    duel: { plays: 0, p1wins: 0, p2wins: 0 },                   // 双人热座对决战绩（红队/蓝队胜负）
+    firstRun: true       // 新玩家引导条：完成首次冒险通关后置 false 永久隐藏（stageClear）
   };
 }
 
@@ -101,6 +102,8 @@ function sanitizeSave(src) {
   if (typeof s.pet === 'string') d.pet = s.pet;
   if (typeof s.unitMode === 'string') d.unitMode = s.unitMode;
   if (typeof s.unitList === 'string') d.unitList = s.unitList;
+  /* firstRun 引导条标记：新档默认 true；旧版本存档没有该字段 → 视为老玩家 false（不弹引导） */
+  d.firstRun = (typeof s.firstRun === 'boolean') ? s.firstRun : false;
   if (objOr(s.poisonIssued)) {
     var pi = objOr(s.poisonIssued);
     d.poisonIssued = {
@@ -262,7 +265,7 @@ function sanitizeSave(src) {
       t: intOr(o.t, 0, 0, 8.64e15)
     };
   });
-  /* 词魂肉鸽 / 双人对决档案（新增模式，旧档缺字段自动取默认） */
+  /* 词魂肉鸽 / 双人热座对决档案（新增模式，旧档缺字段自动取默认） */
   var rgS = objOr(s.rogue);
   if (rgS) {
     d.rogue = {
@@ -679,7 +682,7 @@ var TASK_DEFS = [
   { id: 'run_any',    icon: '🏁', txt: '完成 1 局游戏',        goal: 1,  reward: 20 },
   { id: 'review_done',icon: '📖', txt: '完成 1 次复习模式',    goal: 1,  reward: 25 },
   { id: 'new_words',  icon: '🌱', txt: '遇到 8 个新单词',      goal: 8,  reward: 30 },
-  { id: 'lab_ok',     icon: '🧪', txt: '词根实验室答对 5 题',  goal: 5,  reward: 20 },
+  { id: 'lab_ok',     icon: '🧪', txt: '词根合成实验室答对 5 题',  goal: 5,  reward: 20 },
   { id: 'exp_kill',   icon: '🚀', txt: '每日远征击破 10 名敌军', goal: 10, reward: 35 }
 ];
 function taskDef(id) {
@@ -793,14 +796,14 @@ var ACH = [
   ['pack1',       '🧩', '主题挑战者', '主题挑战包通过第 1 关'],
   ['packs3',      '🎒', '包罗万象', '完成 3 个不同的主题挑战包'],
   ['exp1',        '🚀', '远征先锋', '通关一次每日远征'],
-  ['lab30',       '🧪', '词根炼金师', '词根实验室累计答对 30 题'],
+  ['lab30',       '🧪', '词根炼金师', '词根合成实验室累计答对 30 题'],
   ['mod_all',     '👁️', '词缀图鉴', '遭遇过全部 ' + Object.keys(BOSS_MODS).length + ' 种 BOSS 词缀'],
   ['rogue1',      '🎲', '词魂出征', '完成一局词魂肉鸽'],
   ['rogue_win',   '👑', '词魂加冕', '通关词魂肉鸽（击败第 6 关 BOSS）'],
   ['rogue_chain', '🔗', '连锁法师', '单局词根连锁 5 次'],
   ['rogue_curse', '📜', '诅咒图鉴', '遭遇过 6 种不同的全局诅咒'],
   ['duel1',       '🤝', '棋逢对手', '完成一局双人同屏对决'],
-  ['duel_win',    '🏆', '对决之王', '在双人对决中累计取胜 3 次']
+  ['duel_win',    '🏆', '对决之王', '在双人热座对决中累计取胜 3 次']
 ];
 function masteredCount() {
   var n = 0;
@@ -3450,14 +3453,14 @@ function addPressure(n) {
   }
 }
 
-var timerPendingSec = 0;   /* 接力弹层暂停期间出的新题：先存时长不起算 deadline，续跑时再开始倒计时 */
+var timerPendingSec = 0;   /* 接力弹层/页面后台暂停期间出的新题：先存时长不起算 deadline，续跑时再开始倒计时 */
 function startTimer(sec) {
   stopTimer();
   timerDur = sec * 1000;
   lastTickT = 0;
-  /* 战斗页接力弹层暂停中：题面照常渲染，但不设 deadline（设了会按墙钟逼近，
-     长暂停后一关闭就立刻超时）——时长暂存，relayResumeBattleTimer 续跑时起算 */
-  if (relayTimerSuppressed()) { timerPendingSec = sec; timerEnd = 0; return; }
+  /* 战斗页接力弹层暂停中（或页面切后台）：题面照常渲染，但不设 deadline（设了会按墙钟逼近，
+     长暂停后一关闭/回前台就立刻超时）——时长暂存，relayResumeBattleTimer / 后台恢复补偿续跑时起算 */
+  if (relayTimerSuppressed() || hiddenBattlePaused) { timerPendingSec = sec; timerEnd = 0; return; }
   timerPendingSec = 0;
   timerEnd = performance.now() + timerDur;
   tick();
@@ -3850,6 +3853,8 @@ function stageClear() {
   save.coins += bonus;
   run.coinsEarned += bonus;
   addXp(8);
+  /* 新玩家引导：完成首次冒险通关（主线/毒池/词境/肉鸽的任一关卡通关）即永久隐藏引导条 */
+  if (save.firstRun) { save.firstRun = false; }
   if (run.mode === 'adventure' && !run.poison && !run.rogue && !run.realm) save.best.adventure = Math.max(save.best.adventure, run.stage);
   if (run.packId && !run.poison) markPackDone();   /* 主题挑战包：通过第 1 关那一刻即计完成 */
   persist();
@@ -4314,12 +4319,14 @@ function updateHUD() {
     } else {
       $('battle-stage').textContent = (run.bossStage ? '⚠️ ' : '') + '第 ' + run.stage + ' 关';
     }
-    var remain = run.stageSize - run.killedInStage;
+    /* 击杀动画到下一只怪刷新的间隙，killedInStage 可能短暂等于 stageSize（关卡收尾/
+       恢复兜底路径）：此时钳到 1 显示「上一值」，不允许闪出「👹 ×0」一帧 */
+    var remain = Math.max(1, run.stageSize - run.killedInStage);
     $('monster-queue').textContent = run.bossStage ? '' : '👹 ×' + remain;
   } else if (run.mode === 'expedition') {
     $('battle-stage').textContent = '🚀 第 ' + run.stage + '/' + EXP_STAGES.length + ' 关' +
       (run.bossStage ? ' ⚠️' : (run.bossMod ? ' ⚠️精英' : ''));
-    var remainExp = run.stageSize - run.killedInStage;
+    var remainExp = Math.max(1, run.stageSize - run.killedInStage);
     $('monster-queue').textContent = run.bossStage ? '' : '👹 ×' + remainExp;
   } else if (run.mode === 'endless') {
     $('battle-stage').textContent = '击杀 ' + run.kills;
@@ -4507,6 +4514,9 @@ function refreshHome() {
   $('home-today').textContent = save.streak.todayCount;
   $('home-level').textContent = save.level;
   $('btn-talent').textContent = '✨ 天赋' + (save.talentPts > 0 ? ' +' + save.talentPts : '');
+  /* 新玩家引导条：只在 firstRun 存档上显示；完成首次冒险通关（stageClear）后永久隐藏 */
+  var guide = $('btn-guide');
+  if (guide) guide.hidden = !save.firstRun;
   /* 每日远征入口：当日已通关/历史最高分直接写在按钮上 */
   var expSub = $('exp-sub');
   if (expSub) {
@@ -4917,8 +4927,8 @@ function openIO(mode, payload) {
   var titles = {
     'export': '📤 导出存档（复制下面这段文本保管）',
     'import': '📥 导入存档（粘贴之前导出的文本）',
-    'poison': '☠️ 粘贴挑战码（接受好友的投毒）',
-    'poison-export': '⚔️ 挑战码已生成（复制发给好友，区分大小写）',
+    'poison': '☠️ 投毒挑战码（粘贴好友发来的码应战）',
+    'poison-export': '⚔️ 投毒挑战码已生成（复制发给好友，区分大小写）',
     'result-export': '📨 成绩码（复制回贴给出题者）'
   };
   $('io-title').textContent = titles[mode] || titles['export'];
@@ -5293,7 +5303,7 @@ function doPoisonExport() {
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(code).then(function () {
-        toast('⚔️ 挑战码已自动复制，直接粘贴发给好友！');
+        toast('⚔️ 投毒挑战码已自动复制，直接粘贴发给好友！');
       }, function () {});
     }
   } catch (e) {}
@@ -5539,8 +5549,10 @@ function duelFinish() {
     chips += '<span class="chip">' + DUEL_PLAYERS[p].icon + ' ' + DUEL_PLAYERS[p].name + ' ' + duel.scores[p] +
       ' 分 · 答对 ' + duel.correct[p] + '/' + DUEL_ROUNDS + ' · 最高连击 ×' + duel.maxCombo[p] + '</span>';
   }
+  /* 结算页同源布局（七种之一：热座对决）：标题（duel-verdict）→ 核心数据（result-stats，
+     与 scr-result 承载的六种共用同一布局类）→ 说明 hint；按钮区沿用屏内 setup-actions */
   $('duel-result').innerHTML = '<div class="duel-verdict">' + verdict + '</div>' +
-    '<div class="duel-result-chips">' + chips + '</div>' +
+    '<div class="result-stats">' + chips + '</div>' +
     '<p class="hint">🪙 红队 +' + c1 + ' · 蓝队 +' + c2 + ' · 全部作答已写入掌握度与间隔重复</p>';
   $('btn-duel-start').hidden = false;
   $('btn-duel-start').textContent = '🔄 再来一局';
@@ -5555,13 +5567,13 @@ function onKey(e) {
     if (!$('relay-overlay').hidden) { e.preventDefault(); relayClose(); return; }
     if (!$('share-overlay').hidden) { e.preventDefault(); $('share-overlay').hidden = true; return; }
   }
-  /* 双人对决：1-4 选项作答（当前出题方的键盘操作） */
+  /* 双人热座对决：1-4 选项作答（当前出题方的键盘操作） */
   if ($('scr-duel') && $('scr-duel').classList.contains('active') && duel && duel.phase === 'q' && duel.q && !duel.q.locked) {
     var dn = parseInt(e.key, 10);
     if (dn >= 1 && dn <= 4) { e.preventDefault(); duelAnswer(dn - 1); }
     return;
   }
-  /* 词根实验室：1-4 选项作答（与战斗页键位习惯一致） */
+  /* 词根合成实验室：1-4 选项作答（与战斗页键位习惯一致） */
   if ($('scr-lab') && $('scr-lab').classList.contains('active') && lab && lab.q && !lab.locked) {
     var ln = parseInt(e.key, 10);
     if (ln >= 1 && ln <= 4) {
@@ -5616,6 +5628,7 @@ function onKey(e) {
 function bindEvents() {
   // 主菜单
   $('btn-adventure').onclick = function () { openSetup('adventure'); };
+  $('btn-guide').onclick = function () { openSetup('adventure'); };   /* 引导条 → 主线冒险 */
   $('btn-endless').onclick = function () { openSetup('endless'); };
   $('btn-review').onclick = function () { openSetup('review'); };
   $('btn-expedition').onclick = function () { openSetup('expedition'); };
@@ -5670,7 +5683,7 @@ function bindEvents() {
     var cc = e.target.closest('[data-rogue-c]');
     if (cc) pickRogueCurse(cc.getAttribute('data-rogue-c'));
   });
-  // 双人对决
+  // 双人热座对决
   $('btn-duel').onclick = openDuel;
   $('btn-duel-start').onclick = startDuelGame;
   $('btn-duel-ready').onclick = duelReady;
@@ -6494,7 +6507,7 @@ function relayResumeAfterReload() {
 }
 
 /* ---------- 对局快照（大胆层：run 级接力，第二层） ----------
-   只覆盖低风险通道：冒险/无尽（含词魂肉鸽、主题包）。毒池局由挑战码承载、
+   只覆盖低风险通道：冒险/无尽（含词魂肉鸽、主题挑战包）。毒池局由挑战码承载、
    远征局词池按日期种子生成，二者不做 run 级接力（帮助页已如实标注）。 */
 function relayRunSnapshot() {
   if (!run || run.ended) return null;
@@ -6668,6 +6681,40 @@ function relayClose() {
   $('relay-overlay').hidden = true;
   relayResumeBattleTimer();
 }
+
+/* ---------- 页面后台冻结（与接力弹窗的计时暂停同一套机制） ----------
+   页面不可见（切后台/锁屏/切应用）时 rAF 停摆，倒计时画面不动，但 timerEnd 是
+   墙钟 deadline——后台待几分钟再回来，剩余时间早被吃光，一回来当前题立刻超时
+   扣城防。这里与 relayPauseBattleTimer 同构：hide 时记下此刻剩余毫秒并停表
+   （hiddenPausedLeftMs 冻结 deadline），show 时用冻结的剩余值重设 timerEnd 续跑；
+   后台期间若横幅回调出了新题，startTimer 的抑制闸会把时长暂存到 timerPendingSec，
+   回前台从零起算全额时间。压境推进由 tick 的 rAF 驱动，后台天然停摆，无需补偿。 */
+var hiddenBattlePaused = false, hiddenPausedLeftMs = 0;
+document.addEventListener('visibilitychange', function () {
+  var act = null;
+  try { act = document.querySelector('.screen.active'); } catch (e) {}
+  if (document.hidden) {
+    if (run && !run.ended && act && act.id === 'scr-battle') {
+      hiddenPausedLeftMs = (run.q && !run.q.locked && timerRAF && timerEnd > 0)
+        ? Math.max(0, timerEnd - performance.now()) : 0;
+      stopTimer();
+      hiddenBattlePaused = true;
+    }
+  } else if (hiddenBattlePaused) {
+    hiddenBattlePaused = false;
+    if (!run || run.ended || !run.q || run.q.locked || timerRAF) { hiddenPausedLeftMs = 0; timerPendingSec = 0; return; }
+    /* 接力弹层仍在暂停中：续跑交给 relayResumeBattleTimer，避免两处抢着起表 */
+    if (relayBattlePaused) return;
+    if (timerPendingSec > 0) {
+      timerEnd = performance.now() + timerPendingSec * 1000;
+      timerPendingSec = 0;
+    } else if (hiddenPausedLeftMs > 0) {
+      timerEnd = performance.now() + hiddenPausedLeftMs;   /* 冻结的剩余值起算（恢复补偿） */
+    }
+    hiddenPausedLeftMs = 0;
+    if (timerEnd > performance.now()) { lastTickT = 0; tick(); }
+  }
+});
 function openRelay() {
   relayUi.incoming = null;
   $('relay-gen').hidden = false;
@@ -7142,6 +7189,18 @@ function renderRealmList() {
 function openRealm() {
   if (!buildEnc()) { showLoadFail(); return; }
   showScreen('scr-realm');
+  /* 重进一律恢复默认草稿：词源勾选（下方 renderRealmSrc 重建即全不勾）、自定义词表、
+     词缀、三个参数旋钮、开场引言全部复位——上一次编辑的半成品不再悄悄带进下一次生成 */
+  realmDraft.mods = [];
+  $('realm-custom-text').value = '';
+  $('realm-castle').value = '1';
+  $('realm-monhp').value = '1';
+  $('realm-time').value = '1';
+  $('realm-castle-val').textContent = '×1.0';
+  $('realm-monhp-val').textContent = '×1.0';
+  $('realm-time-val').textContent = '×1.0';
+  $('realm-intro').value = '';
+  $('realm-intro-count').textContent = '0/50';
   realmUi.incoming = null;
   realmUi.shards = null;
   $('realm-share').hidden = true;
