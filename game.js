@@ -802,7 +802,7 @@ var ACH = [
   ['rogue_win',   '👑', '词魂加冕', '通关词魂肉鸽（击败第 6 关 BOSS）'],
   ['rogue_chain', '🔗', '连锁法师', '单局词根连锁 5 次'],
   ['rogue_curse', '📜', '诅咒图鉴', '遭遇过 6 种不同的全局诅咒'],
-  ['duel1',       '🤝', '棋逢对手', '完成一局双人同屏对决'],
+  ['duel1',       '🤝', '棋逢对手', '完成一局双人热座对决'],
   ['duel_win',    '🏆', '对决之王', '在双人热座对决中累计取胜 3 次']
 ];
 function masteredCount() {
@@ -7207,8 +7207,11 @@ function openRealm() {
   $('realm-confirm').hidden = true;
   $('realm-in-text').value = '';
   $('realm-parts-note').textContent = '';
-  $('realm-src-note').textContent = realmDraftPreview();
+  /* 词表草稿的清空必须先于摘要行重渲染：renderRealmSrc 重建词源列表（全部不勾）才是
+     真正的「清空词表」，之后再按复位后的 DOM 算摘要——顺序反了会把旧勾选的词表
+     残留在摘要行（「当前词表 N 词」谎报），点生成时与 UI 不一致。 */
   renderRealmSrc();
+  $('realm-src-note').textContent = realmDraftPreview();
   renderRealmMods();
   renderRealmList();
 }
@@ -7217,6 +7220,8 @@ function openRealm() {
 function realmGenerate() {
   try {
     var r = realmDraftBuild();
+    /* 词数不足/参数无效时 realmDraftBuild 必已 toast（「词境至少需要 4 个有效词…」/
+       「词境参数无效」），这里 return 不构成静默路径 */
     if (!r) return;
     if (!relayQrAvailable()) { toast('二维码库未加载（libs/qrcode.min.js），仍可复制文本词境码'); }
     realmShowShare(r);
