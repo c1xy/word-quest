@@ -475,6 +475,15 @@ body {
 .shop-item .si-owned { font-size: 12px; color: #7ce8ff; }
 .shop-item .btn { width: 100%; padding: 8px; font-size: 14px; }
 .shop-item.maxed { opacity: .6; }
+/* 桌面宽视口：三块货架（补给/强化/宠物）整体限高内部滚动，「➡️ 继续冒险」恒驻面板底部
+   —— 1280×720 下按钮原本落在首屏外需滚页（第 9 轮终验注记项），竖屏手机（<760px）不受影响 */
+.shop-shelves { min-height: 0; }
+@media (min-width: 760px) {
+  #scr-shop .panel { display: flex; flex-direction: column; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); }
+  #scr-shop .panel > * { flex: none; }
+  #scr-shop .shop-shelves { flex: 1 1 auto; overflow-y: auto; margin: 0 -6px; padding: 0 6px; }
+  #scr-shop #btn-next-stage { margin-top: 10px; }
+}
 
 /* ---------- 结算页同源布局（七种：冒险/毒池/远征/肉鸽/词境/听写共用 scr-result；
    热座对决在 scr-duel 内复用同一组布局类）----------

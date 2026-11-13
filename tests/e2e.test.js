@@ -8,6 +8,7 @@
      S5 词境全链路（造境→生成词境码→贴码→开战→SRS 写回）
      S6 听写挑战（headless 无语音包自动降级首字母；无麦克风跟读行自动隐藏 = graceful skip）
      S7 七种结算结构断言（冒险/无尽/复习/远征/听写/词魂肉鸽/毒池）
+     S8 商店「➡️ 继续冒险」1280×720 首屏可达（getBoundingClientRect 全入视口 + 可点进下一关）
    依赖：playwright 或 playwright-core（找不到时整组 SKIP，退出码 0 并说明原因），
    浏览器可执行文件依次探测 playwright 自带 chromium → 环境变量 WQ_CHROME_PATH →
    本机 Chrome/Edge。麦克风/摄像头相关能力 headless 下不可用，用例按游戏内降级路径验证。 */
@@ -89,9 +90,9 @@ function baseSave() {
     lastLists: ['cet4'], firstRun: false
   };
 }
-/* seed === null 表示完全不带存档（走 defaultSave：firstRun=true 新档） */
-async function newContext(browser, seed) {
-  const context = await browser.newContext({ viewport: { width: 420, height: 860 } });
+/* seed === null 表示完全不带存档（走 defaultSave：firstRun=true 新档）；viewport 可选（默认竖屏 420×860） */
+async function newContext(browser, seed, viewport) {
+  const context = await browser.newContext({ viewport: viewport || { width: 420, height: 860 } });
   if (seed !== null) {
     /* 注意：addInitScript 会序列化函数体，模块闭包变量（SAVE_KEY）在页面里不存在，
        必须用字面量键名；存档内容经 arg 传入。另：种子只落一次（wq_seed_done 标记），
@@ -687,6 +688,35 @@ if (!resolvable) {
         await c7.page.waitForSelector('#scr-result.active', { timeout: 10000 });
         await assertResult(c7.page, 'S7-⑦毒池(quit)', '🏳️ 逃出毒池', '☠️ 毒词攻克');
         await c7.context.close();
+      }
+
+      /* ============ S8 · 商店「➡️ 继续冒险」1280×720 首屏可达（第 9 轮终验回归护栏） ============ */
+      console.log('---- S8 商店首屏 CTA 可达 ----');
+      {
+        // 桌面 1280×720：首关打通进商店，「继续冒险」必须完全落在首屏内且可点
+        const d = await newContext(browser, null, { width: 1280, height: 720 });
+        await gotoHome(d.page);
+        await startBattleFromSetup(d.page, 'adventure');
+        const finish = await battleChoice(d.page, 'shop');
+        ok('S8 首关打通进入商店（1280×720）', finish === 'shop', finish);
+        await d.page.waitForSelector('#scr-shop.active', { timeout: 5000 });
+        const cta = await d.page.evaluate(() => {
+          const b = document.getElementById('btn-next-stage');
+          const r = b.getBoundingClientRect();
+          return {
+            vw: window.innerWidth, vh: window.innerHeight,
+            top: Math.round(r.top), bottom: Math.round(r.bottom),
+            left: Math.round(r.left), right: Math.round(r.right),
+            shown: b.getClientRects().length > 0
+          };
+        });
+        ok('S8 「➡️ 继续冒险」getBoundingClientRect 完全在 1280×720 视口内',
+          cta.shown && cta.top >= 0 && cta.left >= 0 && cta.bottom <= cta.vh && cta.right <= cta.vw, JSON.stringify(cta));
+        await d.page.click('#btn-next-stage');
+        await d.page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        ok('S8 「➡️ 继续冒险」点击直达下一关战斗页', true);
+        ok('S8 无页面异常（pageerror=0）', d.errors.length === 0, d.errors.join(' | '));
+        await d.context.close();
       }
 
       await browser.close();
