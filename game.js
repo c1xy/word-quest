@@ -3892,7 +3892,8 @@ function openShop() {
 function openShopCore() {
   showScreen('scr-shop');
   $('shop-coins').textContent = save.coins;
-  $('shop-sub').textContent = '第 ' + run.stage + ' 关通关！奖励 🪙' + Math.round((20 + run.stage * 2) * coinMult()) + ' · 当前第 ' + run.stage + ' 关';
+  /* 副标题：头尾各说一事——刚通关的关卡 / 即将进入的下一关（此前「· 当前第 N 关」与开头重复且误导，实际点「继续冒险」进的是 N+1 关） */
+  $('shop-sub').textContent = '第 ' + run.stage + ' 关通关！奖励 🪙' + Math.round((20 + run.stage * 2) * coinMult()) + ' · 下一关 第 ' + (run.stage + 1) + ' 关';
 
   var wrap = $('shop-items');
   wrap.innerHTML = '';
@@ -4097,6 +4098,7 @@ function endRunCore(reason) {
     }
     checkAch();
     if (run.mode === 'drill' && reason === 'done') titles.done = '🔥 强化训练完成！';
+    if (run.mode === 'review' && reason === 'quit') titles.quit = '🏳️ 复习中途退出';   /* 与听写撤退同节奏（复习无城防，「撤退整顿」是战斗文案） */
     if (run.mode === 'dictation' && reason === 'done') titles.done = '🎧 听写挑战完成！';
     if (run.mode === 'dictation' && reason === 'quit') titles.quit = '🏳️ 听写中途退出';
     if (run.mode === 'expedition') {
@@ -4933,6 +4935,11 @@ function openIO(mode, payload) {
   };
   $('io-title').textContent = titles[mode] || titles['export'];
   $('io-ok').textContent = mode === 'poison' ? '⚔️ 应战！' : (mode === 'import' ? '确定' : '关闭');
+  /* 按钮行随模式自适应：只读导出态「关闭」即关闭，不再并排多一个同义的「取消」；
+     粘贴类（导入/应战）没有可复制内容，藏掉「复制」防复制空文本还提示「已复制」 */
+  var ioReadOnly = (mode === 'export' || mode === 'poison-export' || mode === 'result-export');
+  $('io-cancel').hidden = ioReadOnly;
+  $('io-copy').hidden = (mode === 'import' || mode === 'poison');
   var ta = $('io-text');
   ta.value = mode === 'export' ? JSON.stringify(save) : (payload !== undefined ? payload : '');
   ta.placeholder = mode === 'poison' ? '在此粘贴好友发来的挑战码…' : '';
@@ -5561,11 +5568,12 @@ function duelFinish() {
 
 /* ========================= 键盘操作 ========================= */
 function onKey(e) {
-  /* Esc：接力码/分享卡弹层的桌面逃生通道（生成态内容高，滚动之外多一条路；
-     relayClose 会顺带续跑战斗计时） */
+  /* Esc：接力码/分享卡/存档弹层的桌面逃生通道（生成态内容高，滚动之外多一条路；
+     relayClose 会顺带续跑战斗计时。io 弹层同为高内容文本域弹层，此前漏了 Esc） */
   if (e.key === 'Escape') {
     if (!$('relay-overlay').hidden) { e.preventDefault(); relayClose(); return; }
     if (!$('share-overlay').hidden) { e.preventDefault(); $('share-overlay').hidden = true; return; }
+    if (!$('io-overlay').hidden) { e.preventDefault(); $('io-overlay').hidden = true; return; }
   }
   /* 双人热座对决：1-4 选项作答（当前出题方的键盘操作） */
   if ($('scr-duel') && $('scr-duel').classList.contains('active') && duel && duel.phase === 'q' && duel.q && !duel.q.locked) {
@@ -5800,7 +5808,9 @@ function bindEvents() {
   $('btn-result-home').onclick = function () { showScreen('scr-home'); refreshHome(); };
 
   // 图鉴
-  $('btn-codex-back').onclick = function () { showScreen('scr-home'); };
+  /* 图鉴内可改学习状态（详情卡「标记已掌握/重置记录」、自定义词库），返回主页要
+     refreshHome 同步 chips——此前漏调，标记已掌握后主页「已掌握 N 词」停在旧值 */
+  $('btn-codex-back').onclick = function () { showScreen('scr-home'); refreshHome(); };
   $('confuse-list').addEventListener('click', function (e) {
     var b = e.target.closest('.cf-duel');
     if (b) startDuel(b.dataset.a, b.dataset.b);
