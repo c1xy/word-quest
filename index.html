@@ -27,14 +27,14 @@
   });
 })();
 </script>
-<link rel="stylesheet" href="style.css?v=20261114a">
+<link rel="stylesheet" href="style.css?v=20261114b">
 </head>
 <body>
 <div id="app">
 
   <!-- ============ 主菜单 ============ -->
   <section class="screen active" id="scr-home">
-    <div class="deco-layer" id="home-deco">🌲 ✨ 🍄 ⛰️ 🌟 🌲 ✨ 🦋</div>
+    <div class="deco-layer" id="home-deco" aria-hidden="true">🌲 ✨ 🍄 ⛰️ 🌟 🌲 ✨ 🦋</div>
     <div class="home-inner">
       <h1 class="logo">⚔️ 单词大冒险</h1>
       <p class="slogan">打怪 · 闯关 · 记单词</p>
@@ -141,14 +141,14 @@
 
       <div id="unit-row" class="unit-row" hidden>
         <span class="unit-label">📔 单元模式</span>
-        <select id="unit-select" class="plan-select"></select>
+        <select id="unit-select" class="plan-select" aria-label="单元模式选择"></select>
         <span class="unit-progress" id="unit-progress"></span>
       </div>
       <p class="hint" id="unit-hint" hidden>单元模式下：新词按单元顺序推进（像背单词书），复习仍按遗忘曲线全局调度</p>
 
       <div id="setup-size-row" class="unit-row">
         <span class="unit-label">⚔️ 本局词量</span>
-        <select id="setup-size" class="plan-select">
+        <select id="setup-size" class="plan-select" aria-label="本局词量">
           <option value="10" selected>10 词</option>
           <option value="15">15 词</option>
           <option value="20">20 词</option>
@@ -183,7 +183,7 @@
 
   <!-- ============ 战斗 ============ -->
   <section class="screen" id="scr-battle">
-    <div class="deco-layer" id="battle-deco"></div>
+    <div class="deco-layer" id="battle-deco" aria-hidden="true"></div>
 
     <header class="battle-top">
       <button class="btn btn-tiny" id="btn-quit">🏳️ 退出</button>
@@ -215,6 +215,8 @@
         <div class="monster-hp-wrap">
           <div class="monster-hp-bar"><div class="monster-hp-fill" id="monster-hp-fill"></div></div>
           <span class="monster-name" id="monster-name">小幽灵</span>
+          <!-- 词性文字徽标：光环颜色的冗余信号（色弱友好），paintMonsterVisual 驱动 -->
+          <span class="monster-pos" id="monster-pos" hidden></span>
           <div class="boss-mod" id="boss-mod" hidden></div>
         </div>
         <div class="monster-figure" id="monster-figure" title="⚡ 点击怪物：蓄力一击！">
@@ -268,7 +270,7 @@
       </div>
     </div>
 
-    <div class="fx-layer" id="fx-layer"></div>
+    <div class="fx-layer" id="fx-layer" aria-hidden="true"></div>
   </section>
 
   <!-- ============ 商店（过关后） ============ -->
@@ -316,7 +318,7 @@
       <div id="codex-stats" class="codex-stats"></div>
       <canvas id="stats-canvas"></canvas>
       <div class="codex-tools">
-        <input type="text" id="codex-search" placeholder="🔍 搜索单词或释义…">
+        <input type="text" id="codex-search" placeholder="🔍 搜索单词或释义…" aria-label="搜索单词或释义">
         <div class="filter-row" id="codex-filters">
           <button class="btn btn-tiny filter active" data-f="all">全部</button>
           <button class="btn btn-tiny filter" data-f="new">⬜ 未学</button>
@@ -333,8 +335,8 @@
       <h3 class="section-title">✏️ 我的词库</h3>
       <p class="hint">每行一个：英文 + 释义（用空格、冒号或制表符分隔），例如 <code>apple n. 苹果</code></p>
       <div class="custom-editor">
-        <input type="text" id="custom-name" placeholder="词库名称，如：我的考研真题词" maxlength="20">
-        <textarea id="custom-text" rows="5" placeholder="abandon v. 放弃&#10;absorb v. 吸收&#10;（每行一个单词）"></textarea>
+        <input type="text" id="custom-name" placeholder="词库名称，如：我的考研真题词" maxlength="20" aria-label="词库名称">
+        <textarea id="custom-text" rows="5" placeholder="abandon v. 放弃&#10;absorb v. 吸收&#10;（每行一个单词）" aria-label="自定义词库内容（每行一个单词）"></textarea>
         <div class="setup-actions">
           <button class="btn btn-small btn-primary" id="btn-custom-save">💾 保存词库</button>
         </div>
@@ -485,6 +487,7 @@
       <h3 class="section-title">① 选词源（勾选或粘贴，至少 4 词，上限 30 词）</h3>
       <div id="realm-src-list" class="realm-src-list"></div>
       <textarea id="realm-custom-text" rows="3" spellcheck="false" autocapitalize="off" autocorrect="off"
+        aria-label="粘贴自定义词表（每行一个单词）"
         placeholder="粘贴自定义词表（每行一个单词，可带释义；必须在内置 2909 词词典内，超出 30 词只取前 30）&#10;例如：&#10;abandon v. 放弃&#10;absorb"></textarea>
       <p class="hint" id="realm-src-note"></p>
 
@@ -494,12 +497,12 @@
 
       <h3 class="section-title">③ 调参数</h3>
       <div class="realm-param-row"><span class="realm-param-label">🏰 城防血量</span>
-        <input type="range" id="realm-castle" min="0.5" max="2" step="0.1" value="1"><b class="realm-param-val" id="realm-castle-val">×1.0</b></div>
+        <input type="range" id="realm-castle" min="0.5" max="2" step="0.1" value="1" aria-label="城防血量倍率"><b class="realm-param-val" id="realm-castle-val">×1.0</b></div>
       <div class="realm-param-row"><span class="realm-param-label">👾 怪物血量</span>
-        <input type="range" id="realm-monhp" min="0.5" max="3" step="0.1" value="1"><b class="realm-param-val" id="realm-monhp-val">×1.0</b></div>
+        <input type="range" id="realm-monhp" min="0.5" max="3" step="0.1" value="1" aria-label="怪物血量倍率"><b class="realm-param-val" id="realm-monhp-val">×1.0</b></div>
       <div class="realm-param-row"><span class="realm-param-label">⏱ 每题时限</span>
-        <input type="range" id="realm-time" min="0.5" max="2" step="0.1" value="1"><b class="realm-param-val" id="realm-time-val">×1.0</b></div>
-      <input type="text" id="realm-intro" maxlength="50" placeholder="开场引言（可选，≤50 字，进入词境时横幅展示）">
+        <input type="range" id="realm-time" min="0.5" max="2" step="0.1" value="1" aria-label="每题时限倍率"><b class="realm-param-val" id="realm-time-val">×1.0</b></div>
+      <input type="text" id="realm-intro" maxlength="50" placeholder="开场引言（可选，≤50 字，进入词境时横幅展示）" aria-label="开场引言（可选，50 字以内）">
       <span class="hint" id="realm-intro-count">0/50</span>
 
       <div class="setup-actions">
@@ -513,15 +516,15 @@
         <h3 class="section-title">📤 词境码已生成（复制文本或扫码分享）</h3>
         <div class="realm-sum-box" id="realm-share-sum"></div>
         <div id="realm-qr-wrap">
-          <canvas id="realm-qr" class="relay-qr" width="10" height="10"></canvas>
+          <canvas id="realm-qr" class="relay-qr" width="10" height="10" role="img" aria-label="词境码二维码（按顺序逐张扫）"></canvas>
           <div class="relay-pager">
-            <button class="btn btn-tiny" id="btn-realm-prev">◀</button>
+            <button class="btn btn-tiny" id="btn-realm-prev" aria-label="上一片词境码">◀</button>
             <span id="realm-page-info">第 1/1 片</span>
-            <button class="btn btn-tiny" id="btn-realm-next">▶</button>
+            <button class="btn btn-tiny" id="btn-realm-next" aria-label="下一片词境码">▶</button>
           </div>
           <p class="hint">多张码请按顺序逐张扫：每扫一张自动收下该片并提示进度，集齐后弹出开战确认。</p>
         </div>
-        <textarea id="realm-text" spellcheck="false" autocapitalize="off" autocorrect="off" readonly></textarea>
+        <textarea id="realm-text" spellcheck="false" autocapitalize="off" autocorrect="off" readonly aria-label="词境码完整文本（复制发给好友）"></textarea>
         <div class="relay-row">
           <button class="btn btn-tiny btn-primary" id="btn-realm-copy">📋 复制词境码</button>
         </div>
@@ -532,6 +535,7 @@
       <div id="realm-recv">
         <h3 class="section-title">📥 粘贴词境码开战</h3>
         <textarea id="realm-in-text" spellcheck="false" autocapitalize="off" autocorrect="off"
+          aria-label="粘贴好友发来的词境码"
           placeholder="粘贴好友发来的词境码（RM. 开头的完整文本，或含 #m= 的链接）…"></textarea>
         <div class="relay-row">
           <button class="btn btn-primary btn-tiny" id="btn-realm-parse">📥 解析词境码</button>
@@ -666,7 +670,7 @@
   </section>
 
   <!-- 记忆卡片（答错弹出） -->
-  <div class="overlay" id="memcard" hidden>
+  <div class="overlay" id="memcard" role="dialog" aria-modal="true" aria-label="记忆卡片" hidden>
     <div class="memcard-box">
       <div class="memcard-tag">🧠 记忆卡片</div>
       <div class="mem-emoji" id="mem-emoji" hidden></div>
@@ -686,7 +690,7 @@
   </div>
 
   <!-- 单词详情卡 -->
-  <div class="overlay" id="word-overlay" hidden>
+  <div class="overlay" id="word-overlay" role="dialog" aria-modal="true" aria-label="单词详情" hidden>
     <div class="memcard-box">
       <div class="memcard-tag">📖 单词详情</div>
       <div class="memcard-word" id="wo-word">word</div>
@@ -704,10 +708,10 @@
   </div>
 
   <!-- 存档导出/导入 -->
-  <div class="overlay" id="io-overlay" hidden>
+  <div class="overlay" id="io-overlay" role="dialog" aria-modal="true" aria-label="存档导出导入" hidden>
     <div class="memcard-box io-box">
       <div class="memcard-tag" id="io-title">📤 导出存档</div>
-      <textarea id="io-text" spellcheck="false" autocapitalize="off" autocorrect="off"></textarea>
+      <textarea id="io-text" spellcheck="false" autocapitalize="off" autocorrect="off" aria-label="存档文本（导出复制 / 导入粘贴）"></textarea>
       <div id="io-poison-log" class="io-poison-log" hidden></div>
       <div class="spell-actions">
         <button class="btn btn-tiny" id="io-copy">📋 复制</button>
@@ -718,7 +722,7 @@
   </div>
 
   <!-- 接力码（跨设备搬档：生成二维码 / 扫码粘贴恢复） -->
-  <div class="overlay" id="relay-overlay" hidden>
+  <div class="overlay" id="relay-overlay" role="dialog" aria-modal="true" aria-label="接力码跨设备搬档" hidden>
     <div class="memcard-box io-box relay-box">
       <div class="memcard-tag">📲 接力码 · 跨设备搬档</div>
 
@@ -732,15 +736,15 @@
           连同进行中的对局一起接力（关卡/词表/城防/金币/连击）
         </label>
         <div id="relay-qr-wrap" hidden>
-          <canvas id="relay-qr" class="relay-qr" width="10" height="10"></canvas>
+          <canvas id="relay-qr" class="relay-qr" width="10" height="10" role="img" aria-label="接力码二维码（按顺序逐张扫）"></canvas>
           <div class="relay-pager">
-            <button class="btn btn-tiny" id="btn-relay-prev">◀</button>
+            <button class="btn btn-tiny" id="btn-relay-prev" aria-label="上一片接力码">◀</button>
             <span id="relay-page-info">第 1/1 片</span>
-            <button class="btn btn-tiny" id="btn-relay-next">▶</button>
+            <button class="btn btn-tiny" id="btn-relay-next" aria-label="下一片接力码">▶</button>
           </div>
           <p class="hint">手机扫码即打开本游戏并自动恢复；多张码请<b>按顺序逐张扫</b>（恢复端自动集齐校验后合并）。也可以复制下方完整文本发给对方粘贴。</p>
         </div>
-        <textarea id="relay-text" spellcheck="false" autocapitalize="off" autocorrect="off" readonly></textarea>
+        <textarea id="relay-text" spellcheck="false" autocapitalize="off" autocorrect="off" readonly aria-label="接力码完整文本（复制发给对方）"></textarea>
         <div class="relay-row">
           <button class="btn btn-tiny" id="btn-relay-copy">📋 复制全部文本</button>
         </div>
@@ -749,7 +753,7 @@
       <div class="relay-sep"></div>
 
       <div id="relay-recv">
-        <textarea id="relay-in-text" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="粘贴好友发来的接力码文本，或含 #r= 的链接…&#10;多片二维码请按顺序逐张扫：每扫一张打开的页面会自动收下该片并提示进度。"></textarea>
+        <textarea id="relay-in-text" spellcheck="false" autocapitalize="off" autocorrect="off" aria-label="粘贴好友发来的接力码文本" placeholder="粘贴好友发来的接力码文本，或含 #r= 的链接…&#10;多片二维码请按顺序逐张扫：每扫一张打开的页面会自动收下该片并提示进度。"></textarea>
         <div class="relay-row">
           <button class="btn btn-primary btn-tiny" id="btn-relay-restore">📥 解析并恢复</button>
           <span class="hint relay-cap" id="relay-parts-note"></span>
@@ -781,7 +785,7 @@
   </div>
 
   <!-- 分享卡预览/下载（支持 navigator.share 的设备直接拉起系统分享） -->
-  <div class="overlay" id="share-overlay" hidden>
+  <div class="overlay" id="share-overlay" role="dialog" aria-modal="true" aria-label="分享卡预览" hidden>
     <div class="memcard-box io-box share-box">
       <div class="memcard-tag">🖼 分享卡</div>
       <img id="share-img" class="share-img" alt="战绩分享卡预览">
@@ -792,13 +796,13 @@
     </div>
   </div>
 
-  <!-- 全局提示 -->
-  <div id="toast-wrap"></div>
+  <!-- 全局提示（读屏可感知：aria-live 播报） -->
+  <div id="toast-wrap" aria-live="polite"></div>
 
 </div>
 
-<script src="libs/qrcode.min.js?v=20261114a"></script>
-<script src="words.js?v=20261114a"></script>
-<script src="game.js?v=20261114a"></script>
+<script src="libs/qrcode.min.js?v=20261114b"></script>
+<script src="words.js?v=20261114b"></script>
+<script src="game.js?v=20261114b"></script>
 </body>
 </html>
