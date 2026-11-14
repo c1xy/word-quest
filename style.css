@@ -41,6 +41,7 @@ body {
   min-height: 100dvh;
   overflow-x: hidden;
   user-select: none;
+  -webkit-user-select: none;   /* 旧 iOS Safari 只认前缀版：长按卡面/按钮不再弹选择气泡 */
 }
 
 #app { max-width: 640px; margin: 0 auto; min-height: 100vh; min-height: 100dvh; position: relative; }
@@ -54,6 +55,8 @@ body {
   animation: screenIn .35s ease;
 }
 .screen.active { display: flex; flex-direction: column; }
+/* 屏容器是 showScreen 的程序化焦点锚点（tabindex=-1，见 game.js）：整屏描边是噪音 */
+.screen:focus { outline: none; }
 
 @keyframes screenIn {
   from { opacity: 0; transform: translateY(14px); }
@@ -124,6 +127,7 @@ body {
 .guide-bar {
   display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;
   width: 100%;
+  min-height: 44px;   /* 触控目标下限：单行排布时实测 41px < 44px（r14 遗留池） */
   font-family: inherit; cursor: pointer;
   background: linear-gradient(135deg, rgba(124,92,255,.35), rgba(255,209,102,.18));
   border: 1px solid rgba(255,209,102,.6);
@@ -661,6 +665,22 @@ body {
     overflow-y: auto;
   }
   #io-overlay .memcard-box { max-height: none; }
+}
+
+/* ===== 触控目标 ≥44px（粗指针设备，宽度无关）（r14）=====
+   上面的 44px 块挂在 max-width:480 下——触屏笔记本 / 平板横竖混用（宽 >480）时全部
+   失效，.btn-tiny 等回落到 ~33px 拇指命中区。pointer:coarse 才是「这根手指在触屏」
+   的本征信号：同一组下限对粗指针设备按输入方式生效，鼠标设备（pointer:fine）不受影响 */
+@media (pointer: coarse) {
+  .btn-tiny { min-height: 44px; padding: 10px 14px; }
+  .btn-small { min-height: 44px; }
+  .shop-item .btn { min-height: 44px; }
+  .lst-del { min-width: 44px; min-height: 44px; }
+  .plan-select { min-height: 44px; }
+  .cx-row { min-height: 44px; }
+  #codex-search { min-height: 44px; }
+  #realm-intro { min-height: 44px; }
+  #custom-name { min-height: 44px; }
 }
 
 /* 矮竖屏（宽 ≤480 且高 ≤700，如小屏安卓）：再压一档，保证战斗一屏放下 */

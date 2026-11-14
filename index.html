@@ -27,13 +27,13 @@
   });
 })();
 </script>
-<link rel="stylesheet" href="style.css?v=20261114c">
+<link rel="stylesheet" href="style.css?v=20261114d">
 </head>
 <body>
 <div id="app">
 
   <!-- ============ 主菜单 ============ -->
-  <section class="screen active" id="scr-home">
+  <section class="screen active" id="scr-home" tabindex="-1">
     <div class="deco-layer" id="home-deco" aria-hidden="true">🌲 ✨ 🍄 ⛰️ 🌟 🌲 ✨ 🦋</div>
     <div class="home-inner">
       <h1 class="logo">⚔️ 单词大冒险</h1>
@@ -132,7 +132,7 @@
   </section>
 
   <!-- ============ 出战设置 ============ -->
-  <section class="screen" id="scr-setup">
+  <section class="screen" id="scr-setup" tabindex="-1">
     <div class="panel">
       <h2 class="panel-title" id="setup-title">🧭 出战准备</h2>
 
@@ -182,7 +182,7 @@
   </section>
 
   <!-- ============ 战斗 ============ -->
-  <section class="screen" id="scr-battle">
+  <section class="screen" id="scr-battle" tabindex="-1">
     <div class="deco-layer" id="battle-deco" aria-hidden="true"></div>
 
     <header class="battle-top">
@@ -274,7 +274,7 @@
   </section>
 
   <!-- ============ 商店（过关后） ============ -->
-  <section class="screen" id="scr-shop">
+  <section class="screen" id="scr-shop" tabindex="-1">
     <div class="panel">
       <h2 class="panel-title">🏪 冒险商店 <span class="coin-badge">🪙 <b id="shop-coins">0</b></span></h2>
       <p class="hint" id="shop-sub"></p>
@@ -293,7 +293,7 @@
   </section>
 
   <!-- ============ 结算 ============ -->
-  <section class="screen" id="scr-result">
+  <section class="screen" id="scr-result" tabindex="-1">
     <div class="panel">
       <h2 class="panel-title" id="result-title">⚔️ 冒险结束</h2>
       <div class="result-stats" id="result-stats"></div>
@@ -312,7 +312,7 @@
   </section>
 
   <!-- ============ 单词图鉴 ============ -->
-  <section class="screen" id="scr-codex">
+  <section class="screen" id="scr-codex" tabindex="-1">
     <div class="panel wide">
       <h2 class="panel-title">📖 单词图鉴</h2>
       <div id="codex-stats" class="codex-stats"></div>
@@ -350,7 +350,7 @@
   </section>
 
   <!-- ============ 错题本 ============ -->
-  <section class="screen" id="scr-wrong">
+  <section class="screen" id="scr-wrong" tabindex="-1">
     <div class="panel wide">
       <h2 class="panel-title">📕 错题本</h2>
       <div class="codex-stats" id="wrong-stats"></div>
@@ -363,7 +363,7 @@
   </section>
 
   <!-- ============ 记忆配对 ============ -->
-  <section class="screen" id="scr-match">
+  <section class="screen" id="scr-match" tabindex="-1">
     <div class="panel wide">
       <h2 class="panel-title">🃏 记忆配对</h2>
       <p class="hint">点击翻牌，或直接<b>拖拽卡片</b>撞向它的另一半！把单词和释义配成一对，越快越准奖励越多。</p>
@@ -381,7 +381,7 @@
   </section>
 
   <!-- ============ 词根合成实验室 ============ -->
-  <section class="screen" id="scr-lab">
+  <section class="screen" id="scr-lab" tabindex="-1">
     <div class="panel">
       <h2 class="panel-title">🧪 词根合成实验室 <span class="coin-badge" id="lab-score">0 分</span></h2>
       <div id="lab-intro">
@@ -417,7 +417,7 @@
   </section>
 
   <!-- ============ 词魂肉鸽 ============ -->
-  <section class="screen" id="scr-rogue">
+  <section class="screen" id="scr-rogue" tabindex="-1">
     <div class="panel">
       <h2 class="panel-title">🎲 词魂肉鸽</h2>
       <div id="rogue-intro">
@@ -437,7 +437,7 @@
   </section>
 
   <!-- ============ 双人热座对决 ============ -->
-  <section class="screen" id="scr-duel">
+  <section class="screen" id="scr-duel" tabindex="-1">
     <div class="panel">
       <h2 class="panel-title">🤝 双人热座对决</h2>
       <div id="duel-intro">
@@ -479,7 +479,7 @@
   </section>
 
   <!-- ============ 词境工坊（玩家自制关卡） ============ -->
-  <section class="screen" id="scr-realm">
+  <section class="screen" id="scr-realm" tabindex="-1">
     <div class="panel wide">
       <h2 class="panel-title">🌌 词境工坊</h2>
       <p class="hint">三步造一个专属词境：选词源 → 挂词缀 → 调参数。生成「词境码」发给好友（或留着自己重玩），开战照常写回学习进度。</p>
@@ -557,7 +557,7 @@
   </section>
 
   <!-- ============ 成就 ============ -->
-  <section class="screen" id="scr-ach">
+  <section class="screen" id="scr-ach" tabindex="-1">
     <div class="panel wide">
       <h2 class="panel-title">🏆 成就墙 <span class="coin-badge" id="ach-count">0 / 0</span></h2>
       <div class="ach-grid" id="ach-grid"></div>
@@ -569,7 +569,7 @@
   </section>
 
   <!-- ============ 天赋 ============ -->
-  <section class="screen" id="scr-talent">
+  <section class="screen" id="scr-talent" tabindex="-1">
     <div class="panel wide">
       <h2 class="panel-title">✨ 天赋殿堂 <span class="coin-badge">⭐ Lv.<b id="talent-lv">1</b></span></h2>
       <div class="talent-head">
@@ -586,7 +586,7 @@
   </section>
 
   <!-- ============ 主题挑战包 ============ -->
-  <section class="screen" id="scr-packs">
+  <section class="screen" id="scr-packs" tabindex="-1">
     <div class="panel">
       <h2 class="panel-title">🧩 主题挑战包</h2>
       <div id="pack-list"></div>
@@ -597,7 +597,7 @@
   </section>
 
   <!-- ============ 设置 ============ -->
-  <section class="screen" id="scr-settings">
+  <section class="screen" id="scr-settings" tabindex="-1">
     <div class="panel">
       <h2 class="panel-title">⚙️ 设置</h2>
 
@@ -633,7 +633,7 @@
   </section>
 
   <!-- ============ 帮助 ============ -->
-  <section class="screen" id="scr-help">
+  <section class="screen" id="scr-help" tabindex="-1">
     <div class="panel">
       <h2 class="panel-title">❓ 玩法说明</h2>
       <div class="help-body">
@@ -801,8 +801,8 @@
 
 </div>
 
-<script src="libs/qrcode.min.js?v=20261114c"></script>
-<script src="words.js?v=20261114c"></script>
-<script src="game.js?v=20261114c"></script>
+<script src="libs/qrcode.min.js?v=20261114d"></script>
+<script src="words.js?v=20261114d"></script>
+<script src="game.js?v=20261114d"></script>
 </body>
 </html>

@@ -1721,6 +1721,13 @@ function renderMatch() {
       var cand = nodes[(prevIdx + k) % nodes.length];
       if (cand.tabIndex >= 0) { try { cand.focus(); } catch (e) {} break; }
     }
+  } else if ($('scr-match').classList.contains('active') && document.activeElement === document.body && !match.finished) {
+    /* 触屏首发即拖拽配对等场景：重建前焦点本就在 BODY，无「原卡」可还原——
+       把锚点落到第一张可用卡，键盘/切换焦点不悬空（r14 焦点管理专项） */
+    var nodes2 = grid.querySelectorAll('.mcard');
+    for (var k2 = 0; k2 < nodes2.length; k2++) {
+      if (nodes2[k2].tabIndex >= 0) { try { nodes2[k2].focus(); } catch (e) {} break; }
+    }
   }
   $('match-moves').textContent = '👟 步数 ' + match.moves;
   $('match-pairs').textContent = '🧩 ' + match.matched + '/' + match.total + ' 对';
@@ -1734,6 +1741,7 @@ function matchPairSuccess(a, b) {
   Sfx.correct(2 + match.matched);
   TTS.speak(a.key, true);
   persist();
+  guardPairFocusOnce();
   if (match.matched >= match.total) finishMatch();
 }
 function onMatchCard(i) {
@@ -1885,6 +1893,29 @@ function matchDragAbort() {
 }
 document.addEventListener('visibilitychange', function () { if (document.hidden) matchDragAbort(); });
 window.addEventListener('pagehide', matchDragAbort);
+/* 配对成功后的焦点保卫（r14 遗留池·触屏特有）：
+   触屏上事件序是 pointerup → 兼容 mousedown——pointerup 里配对成功并 renderMatch
+   重建卡面后，浏览器补发的兼容 mousedown 落在重建 DOM 之外（.done 卡带
+   pointer-events:none 被命中测试穿透，落到 #match-grid），其「把焦点移向目标」的
+   默认行为会把 renderMatch 刚恢复回可用卡上的焦点抹到 BODY——混合设备
+   （触屏+键盘）的键盘锚点就此丢失。桌面鼠标路径 mousedown 先于 pointerup 发生，
+   该补发 mousedown 不存在；守卫只拦「配对成功后紧跟的那一次 mousedown」，
+   下一次交互的 pointerdown 即解除，不改变任何既有行为。 */
+var pairFocusGuard = false;
+function guardPairFocusOnce() {
+  var grid = $('match-grid');
+  if (!grid || pairFocusGuard) return;
+  pairFocusGuard = true;
+  var eat = function (e) { e.preventDefault(); disarm(); };
+  var disarm = function () {
+    if (!pairFocusGuard) return;
+    pairFocusGuard = false;
+    grid.removeEventListener('mousedown', eat, true);
+    grid.removeEventListener('pointerdown', disarm, true);
+  };
+  grid.addEventListener('mousedown', eat, true);
+  grid.addEventListener('pointerdown', disarm, true);
+}
 function finishMatch() {
   match.finished = true;
   stopMatchTimer();
@@ -1897,6 +1928,10 @@ function finishMatch() {
   Confetti.burst(80);
   toast('🃏 配对完成！' + match.moves + ' 步 / ' + secs + ' 秒，奖励 🪙' + coins);
   $('match-time').textContent = '⏱ ' + secs + ' 秒';
+  /* 收官焦点锚点：全部卡已 done（tabIndex=-1），renderMatch 无卡可还原焦点——
+     显式交给面板内主行动按钮「再来一局」，触屏（守卫拦下补发 mousedown）与桌面
+     都落在可交互元素上，Enter 直接续局（r14 焦点管理专项） */
+  try { $('btn-match-restart').focus({ preventScroll: true }); } catch (e) { try { $('btn-match-restart').focus(); } catch (e2) {} }
 }
 
 /* ========================= 词根合成实验室 =========================
@@ -3110,8 +3145,11 @@ function askNext(sameWord, avoidType) {
 }
 function renderQuestion() {
   var q = run.q;
-  /* 移开按钮焦点：避免按 Enter/空格 误触发上一个点过的按钮 */
+  /* 移开按钮焦点：避免按 Enter/空格 误触发上一个点过的按钮。
+     但不落地到 BODY（混合设备键盘锚点丢失，r14 焦点管理专项）——
+     blur 后把焦点交给战斗屏容器（tabindex=-1，不进 Tab 序、Enter/空格无默认行为） */
   if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  try { $('scr-battle').focus({ preventScroll: true }); } catch (e) { try { $('scr-battle').focus(); } catch (e2) {} }
   $('q-type').textContent = (run.mode === 'dictation' && q.type === 'spell'
     ? (TTS.ok ? '🎧 听音拼写（点击 🔊 重听）' : '🎧 听音拼写 · 无语音包，首字母提示')
     : TYPE_LABEL[q.type]) + (q.isRevenge ? ' 　😈 复仇怪兽来袭！' : '');
@@ -3948,6 +3986,16 @@ function openShopCore() {
   /* 副标题：头尾各说一事——刚通关的关卡 / 即将进入的下一关（此前「· 当前第 N 关」与开头重复且误导，实际点「继续冒险」进的是 N+1 关） */
   $('shop-sub').textContent = '第 ' + run.stage + ' 关通关！奖励 🪙' + Math.round((20 + run.stage * 2) * coinMult()) + ' · 下一关 第 ' + (run.stage + 1) + ' 关';
 
+  /* 焦点续接（r14 焦点管理专项）：买一件 = 整店重建，正被点的那颗按钮随 innerHTML=''
+     销毁，焦点掉到 BODY。记住焦点按钮在三段货架按钮序列里的位次，重建后还回去
+     （按钮因金币不足转 disabled 时退回屏容器锚点，不强落失效控件） */
+  var SHOP_BTN_SEL = '#shop-items button, #shop-upgrades button, #shop-pets button';
+  var shopFocusIdx = -1;
+  var shopPrevFocus = document.activeElement;
+  if (shopPrevFocus && shopPrevFocus.closest && shopPrevFocus.closest('#shop-items, #shop-upgrades, #shop-pets')) {
+    shopFocusIdx = Array.prototype.indexOf.call(document.querySelectorAll(SHOP_BTN_SEL), shopPrevFocus);
+  }
+
   var wrap = $('shop-items');
   wrap.innerHTML = '';
   SHOP_ITEMS.forEach(function (item) {
@@ -4059,6 +4107,11 @@ function openShopCore() {
     div.appendChild(btn);
     petWrap.appendChild(div);
   });
+
+  if (shopFocusIdx >= 0) {
+    var nb = document.querySelectorAll(SHOP_BTN_SEL)[shopFocusIdx];
+    if (nb && !nb.disabled) { try { nb.focus({ preventScroll: true }); } catch (e) { try { nb.focus(); } catch (e2) {} } }
+  }
 }
 
 /* ========================= 结算 ========================= */
@@ -4587,6 +4640,14 @@ function showScreen(id) {
   document.querySelectorAll('.screen').forEach(function (s) {
     s.classList.toggle('active', s.id === id);
   });
+  /* 焦点锚点（r14 焦点管理专项）：切屏会隐藏旧屏上正持有焦点的控件（各屏返回键、
+     入口键），焦点掉到 BODY 后 Tab 要从文档头重新数起。把焦点显式交给新屏容器
+     （各 section 带 tabindex=-1，不进 Tab 序、Enter/空格无默认行为），键盘/读屏
+     用户从新屏继续导航。焦点已在新屏内（如商店复购重建、配对重开）时不抢 */
+  var scr = document.getElementById(id);
+  if (scr && document.activeElement && !scr.contains(document.activeElement)) {
+    try { scr.focus({ preventScroll: true }); } catch (e) { try { scr.focus(); } catch (e2) {} }
+  }
 }
 
 function refreshHome() {
@@ -7531,7 +7592,13 @@ function realmBind() {
       var id = del.getAttribute('data-realm-del');
       if (!confirm('删除这个词境？（不影响学习进度）')) return;
       saveRealms(loadRealms().filter(function (x) { return x.id !== id; }));
+      /* 删除 = 列表整体重建，正被点的删除键随 innerHTML 销毁 → 焦点掉 BODY（r14）。
+         还回同位次词境行的第一个可用按钮；列表删空则退回工坊返回键 */
+      var delIdx = Array.prototype.indexOf.call($('realm-saved-list').querySelectorAll('[data-realm-del]'), del);
       renderRealmList();
+      var nb = $('realm-saved-list').querySelectorAll('button')[delIdx * 3];
+      if (nb) { try { nb.focus(); } catch (e2) {} }
+      else { try { $('btn-realm-back').focus(); } catch (e3) {} }
     }
   });
 }

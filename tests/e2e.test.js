@@ -12,6 +12,10 @@
      S9 键盘可达性（Tab 序列含四组入口 / Enter 激活 / div 卡片可聚焦+Enter / 弹层焦点管理+Esc）
      S10 色弱冗余标记（词性文字徽标 / ✓✕ 字形 / 对错色 protan-deutan 投影距离阈值）
      S11 触屏目标 ≥44px（四组 IA 每个按钮 + 设置/图鉴/战斗实测 rect；checkbox 取 label 命中区）
+     S12 焦点管理专项（触屏仿真：答题/商店/弹层开关/词境工坊/记忆配对逐交互断言
+         activeElement 不落 BODY，键盘锚点始终在可交互元素或面板容器上）
+     S13 触屏注入（页内合成 pointer 事件驱动记忆配对全流程：tap 翻牌/拖拽撞击/失配弹回/
+         pointercancel 中断/收官续局，配对结果与焦点双断言）
      S-PERF 性能预算（本地服务：主页加载 ≤3s、首次可交互 ≤5s、JS heap 采样入 PERF-BASELINE 行）
    依赖：playwright 或 playwright-core（找不到时整组 SKIP，退出码 0 并说明原因），
    浏览器可执行文件依次探测 playwright 自带 chromium → 环境变量 WQ_CHROME_PATH →
@@ -94,9 +98,16 @@ function baseSave() {
     lastLists: ['cet4'], firstRun: false
   };
 }
-/* seed === null 表示完全不带存档（走 defaultSave：firstRun=true 新档） */
-async function newContext(browser, seed) {
-  const context = await browser.newContext({ viewport: { width: 420, height: 860 } });
+/* seed === null 表示完全不带存档（走 defaultSave：firstRun=true 新档）
+   opts.touch: 触屏仿真上下文（hasTouch+isMobile）——S11 触控目标实测 / S12 焦点管理 /
+   S13 触屏注入用例需要。此前 S11 传了 {touch:true} 但第三参被静默丢弃，
+   一直跑在纯鼠标上下文里（r14 自查修正） */
+async function newContext(browser, seed, opts) {
+  const context = await browser.newContext({
+    viewport: { width: 420, height: 860 },
+    hasTouch: !!(opts && opts.touch),
+    isMobile: !!(opts && opts.touch)
+  });
   if (seed !== null) {
     /* 注意：addInitScript 会序列化函数体，模块闭包变量（SAVE_KEY）在页面里不存在，
        必须用字面量键名；存档内容经 arg 传入。另：种子只落一次（wq_seed_done 标记），
@@ -396,6 +407,8 @@ if (!resolvable) {
         await gotoHome(a.page);
         await sleep(300);
         ok('S2-① 新档引导条显示', await a.page.evaluate(() => !document.getElementById('btn-guide').hidden));
+        const gh = await a.page.evaluate(() => Math.round(document.getElementById('btn-guide').getBoundingClientRect().height));
+        ok('S2-① 引导条触控目标 ≥44px（实测 ' + gh + 'px，r14 遗留池 41px 修复）', gh >= 44, gh);
         // ② 点引导条 → 进主线冒险出战准备
         await a.page.click('#btn-guide');
         await a.page.waitForSelector('#scr-setup.active', { timeout: 5000 });
@@ -1065,8 +1078,270 @@ if (!resolvable) {
         await page.waitForSelector('#scr-realm.active', { timeout: 5000 });
         await sleep(250);
         assert44('词境工坊', await page.evaluate(MEASURE));
+        await page.click('#btn-realm-back');
+        await backHome(page);
+        // ⑥ 记忆配对（触屏高频界面，r14 起纳入实测）
+        await page.click('#btn-match');
+        await page.waitForSelector('#scr-match.active', { timeout: 5000 });
+        await sleep(300);
+        assert44('记忆配对', await page.evaluate(MEASURE));
         ok('S11 无页面异常（pageerror=0）', c11.errors.length === 0, c11.errors.join(' | '));
         await c11.context.close();
+      }
+
+      /* ============ S12 · 焦点管理专项：四组 IA 主要交互后焦点不掉 BODY ============
+         遍历 答题 / 商店 / 弹层开关 / 词境工坊 / 记忆配对（触屏流程），每次交互后断言
+         document.activeElement 落在可交互元素或面板容器上——混合设备（触屏+键盘）的
+         键盘锚点不允许悬空到 BODY（r14 新增维度）。触屏仿真上下文（tap 输入）。 */
+      console.log('---- S12 焦点不掉 BODY（触屏仿真） ----');
+      {
+        const seed12 = baseSave();
+        seed12.coins = 300;   // 保底可购买，商店重建断言不必看金币脸色
+        const c12 = await newContext(browser, seed12, { touch: true });
+        const page = c12.page;
+        await gotoHome(page);
+        /* 焦点判定：activeElement 不得是 BODY，且必须落在可交互元素或激活面板容器内 */
+        const assertFocus = async (label) => {
+          const r = await page.evaluate(() => {
+            const ae = document.activeElement;
+            if (!ae || ae === document.body) return { ok: false, ae: 'BODY' };
+            const interactive = ae.closest('button, a[href], input, select, textarea, [tabindex], [role="button"], .q-opt, .mcard, .spell-chip');
+            const panel = ae.closest('.screen.active, .overlay');
+            if (interactive || panel) return { ok: true, ae: (ae.id || ae.className || ae.tagName).toString().slice(0, 30) };
+            return { ok: false, ae: (ae.id || ae.className || ae.tagName).toString().slice(0, 30) };
+          });
+          ok(label, r.ok, 'activeElement=' + r.ae);
+        };
+        // ① 答题：tap 选项 → 焦点在按钮；下一题渲染（renderQuestion 移焦）→ 焦点在战斗屏容器
+        await page.tap('#btn-adventure');
+        await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+        await assertFocus('S12-① 进出战设置后焦点在面板');
+        await page.tap('#btn-start');
+        await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked
+          && document.querySelectorAll('#q-options .q-opt').length >= 2, { timeout: 15000 });
+        await sleep(250);
+        const st12 = await page.evaluate(() => ({
+          opts: Array.from(document.querySelectorAll('#q-options .q-opt')).map(b => b.textContent.replace(/^[0-9]+/, '').trim()),
+          qtype: run.q.type, word: run.q.word ? run.q.word.w : null, meaning: run.q.word ? run.q.word.m : null
+        }));
+        const want12 = st12.qtype === 'e2c' ? st12.meaning : st12.word;
+        const idx12 = st12.opts.findIndex(o => o === want12);
+        ok('S12-① 战斗选择题就位', idx12 >= 0, JSON.stringify(st12.opts));
+        await page.tap('#q-options .q-opt >> nth=' + idx12);
+        await sleep(250);
+        await assertFocus('S12-① 答题 tap 后焦点落在选项/弹层（不掉 BODY）');
+        await sleep(1700);   // 等下一题渲染（renderQuestion 移交焦点给 scr-battle 容器）
+        await assertFocus('S12-① 下一题渲染后焦点在战斗屏容器（不掉 BODY）');
+        // ② 商店：打穿第 1 关 → tap 购买 → 整店重建后焦点续接货架按钮
+        const shopR = await battleChoice(page, 'shop');
+        ok('S12-② 打通第 1 关进商店', shopR === 'shop', shopR);
+        await sleep(300);
+        const buyIdx = await page.evaluate(() => {
+          const bs = Array.from(document.querySelectorAll('#shop-items button')).filter(b => !b.disabled);
+          return bs.length ? Array.prototype.indexOf.call(document.querySelectorAll('#shop-items button'), bs[0]) : -1;
+        });
+        if (buyIdx >= 0) {
+          await page.tap('#shop-items button >> nth=' + buyIdx);
+          await sleep(350);
+          await assertFocus('S12-② 商店购买整店重建后焦点续接货架/面板（不掉 BODY）');
+        } else {
+          skip('S12-② 商店购买重建焦点续接', '货架全部买不起（金币不足）');
+        }
+        await page.tap('#btn-next-stage');
+        await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        await sleep(400);
+        await quitBattle(page);
+        await waitResult(page, 15000);
+        await page.tap('#btn-result-home');
+        await page.waitForSelector('#scr-home.active', { timeout: 8000 });
+        await sleep(200);
+        await assertFocus('S12-② 结算回主页焦点在 scr-home 容器');
+        // ③ 弹层开关：设置→导入（焦点入弹层）→Esc（焦点归还触发键）→返回；图鉴词卡同查
+        await page.tap('#btn-settings');
+        await page.waitForSelector('#scr-settings.active', { timeout: 5000 });
+        await assertFocus('S12-③ 进设置页焦点在面板');
+        await page.tap('#btn-import');
+        await page.waitForSelector('#io-overlay:not([hidden])', { timeout: 5000 });
+        await assertFocus('S12-③ io 弹层打开焦点入弹层');
+        await page.keyboard.press('Escape');
+        await sleep(200);
+        await assertFocus('S12-③ Esc 关弹层焦点归还（不掉 BODY）');
+        await page.tap('#btn-settings-back');
+        await page.waitForSelector('#scr-home.active', { timeout: 8000 });
+        await sleep(200);
+        await page.tap('#btn-codex');
+        await page.waitForSelector('#scr-codex.active', { timeout: 5000 });
+        await sleep(350);
+        await page.tap('#codex-list .cx-row');
+        await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 5000 });
+        await assertFocus('S12-③ 词详情卡打开焦点入弹层');
+        await page.keyboard.press('Escape');
+        await sleep(200);
+        await assertFocus('S12-③ Esc 关词卡焦点归还词行（不掉 BODY）');
+        await page.tap('#btn-codex-back');
+        await page.waitForSelector('#scr-home.active', { timeout: 8000 });
+        await sleep(200);
+        await assertFocus('S12-③ 图鉴返回主页焦点在面板');
+        // ④ 词境工坊：输入框聚焦 → 生成 → 焦点仍在触发按钮 → 返回
+        await page.tap('#btn-realm');
+        await page.waitForSelector('#scr-realm.active', { timeout: 5000 });
+        await page.tap('#realm-custom-text');
+        await assertFocus('S12-④ 词境文本域 tap 后聚焦文本域');
+        await page.fill('#realm-custom-text', 'abandon v. 放弃\nability 能力\nabsorb 吸收\nabstract 抽象');   // 与 S5 同源 4 词（词境最少词数门槛）
+        await page.tap('#btn-realm-gen');
+        await page.waitForSelector('#realm-share:not([hidden])', { timeout: 5000 });
+        await assertFocus('S12-④ 生成词境码后焦点仍在触发按钮（不掉 BODY）');
+        await page.tap('#btn-realm-back');
+        await page.waitForSelector('#scr-home.active', { timeout: 8000 });
+        await sleep(200);
+        await assertFocus('S12-④ 词境返回主页焦点在面板');
+        // ⑤ 记忆配对触屏流程：逐对 tap 配对整盘，每次交互后焦点不掉 BODY；收官焦点到「再来一局」
+        await page.tap('#btn-match');
+        await page.waitForSelector('#scr-match.active', { timeout: 5000 });
+        await sleep(350);
+        await assertFocus('S12-⑤ 进配对屏焦点在面板');
+        for (let round = 0; round < 10; round++) {
+          const pair = await page.evaluate(() => {
+            const cards = Array.from(document.querySelectorAll('#match-grid .mcard'));
+            const info = cards.map((c, i) => {
+              const t = c.textContent.replace(/\s+/g, ' ').trim().replace(/^[^A-Za-z\u4e00-\u9fa5]*/, '');
+              return { i: i, done: c.classList.contains('done'), isWord: /^[a-zA-Z][a-zA-Z-]+$/.test(t), text: t };
+            });
+            const w = info.find(c => c.isWord && !c.done);
+            if (!w) return null;
+            const def = (typeof MEANING_OF !== 'undefined') ? MEANING_OF[w.text] : null;
+            const d = info.find(c => !c.done && !c.isWord && def && c.text === def);
+            return w && d ? { wi: w.i, di: d.i } : null;
+          });
+          if (!pair) break;
+          await page.tap('#match-grid .mcard >> nth=' + pair.wi);
+          await sleep(260);
+          await page.tap('#match-grid .mcard >> nth=' + pair.di);
+          await sleep(240);
+          await assertFocus('S12-⑤ 配对第 ' + (round + 1) + ' 对后焦点不掉 BODY');
+        }
+        const pairs12 = await page.evaluate(() => document.getElementById('match-pairs').textContent);
+        ok('S12-⑤ 配对整盘完成（' + pairs12.trim() + '）', pairs12.indexOf('/8') >= 0 && pairs12.indexOf('8/8') >= 0, pairs12);
+        await assertFocus('S12-⑤ 收官焦点在「再来一局」按钮（不掉 BODY）');
+        await page.tap('#btn-match-restart');
+        await sleep(400);
+        await assertFocus('S12-⑤ tap 再来一局后焦点仍在面板内');
+        ok('S12 无页面异常（pageerror=0）', c12.errors.length === 0, c12.errors.join(' | '));
+        await c12.context.close();
+      }
+
+      /* ============ S13 · 触屏注入：pointer/touch 事件驱动记忆配对全流程 ============
+         页内合成 PointerEvent 注入（tap 翻牌 / 拖拽撞击 / 失配弹回 / pointercancel 中断 /
+         收官续局），全流程断言配对结果与焦点不落 BODY（r14 新增维度）。 */
+      console.log('---- S13 触屏注入配对全流程 ----');
+      {
+        const c13 = await newContext(browser, baseSave(), { touch: true });
+        const page = c13.page;
+        await gotoHome(page);
+        await page.tap('#btn-match');
+        await page.waitForSelector('#scr-match.active', { timeout: 5000 });
+        await sleep(350);
+        const pairsState = () => page.evaluate(() => document.getElementById('match-pairs').textContent.trim());
+        const aeDesc = () => page.evaluate(() => {
+          const ae = document.activeElement;
+          return ae === document.body ? 'BODY' : (ae.id || ae.className || ae.tagName).toString().slice(0, 28);
+        });
+        const findPairIdx = () => page.evaluate(() => {
+          const cards = Array.from(document.querySelectorAll('#match-grid .mcard'));
+          const info = cards.map((c, i) => {
+            const t = c.textContent.replace(/\s+/g, ' ').trim().replace(/^[^A-Za-z\u4e00-\u9fa5]*/, '');
+            return { i: i, done: c.classList.contains('done'), isWord: /^[a-zA-Z][a-zA-Z-]+$/.test(t), text: t };
+          });
+          const w = info.find(c => c.isWord && !c.done);
+          if (!w) return null;
+          const def = (typeof MEANING_OF !== 'undefined') ? MEANING_OF[w.text] : null;
+          const d = info.find(c => !c.done && !c.isWord && def && c.text === def);
+          const wrong = info.find(c => !c.done && !c.isWord && (!def || c.text !== def));
+          return { wi: w.i, di: d ? d.i : -1, wrongDi: wrong ? wrong.i : -1, left: info.filter(c => !c.done).length };
+        });
+        /* 页内 pointer 事件注入器：tap = pointerdown+pointerup 原地点击；
+           synthetic pointerId 自选，setPointerCapture 对伪指针抛错由游戏自身 try/catch 兜住 */
+        const tapCard = (wi) => page.evaluate(w => {
+          const cards = document.querySelectorAll('#match-grid .mcard');
+          const r = cards[w].getBoundingClientRect();
+          const o = { bubbles: true, cancelable: true, pointerId: 11, pointerType: 'touch', isPrimary: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 };
+          cards[w].dispatchEvent(new PointerEvent('pointerdown', o));
+          cards[w].dispatchEvent(new PointerEvent('pointerup', o));
+        }, wi);
+        // ① 失配弹回：tap 词卡 + tap 错误释义卡 → 锁定弹回，步数+1、对数不变、焦点不落 BODY
+        let st = await findPairIdx();
+        ok('S13-① 前置：配对局面可读（剩 ' + (st ? st.left : '?') + ' 张）', !!st && st.wrongDi >= 0, JSON.stringify(st));
+        await tapCard(st.wi);
+        await sleep(260);
+        await tapCard(st.wrongDi);
+        await sleep(200);
+        const mismatchState = await page.evaluate(() => ({
+          pairs: document.getElementById('match-pairs').textContent.trim(),
+          moves: document.getElementById('match-moves').textContent.trim(),
+          openN: document.querySelectorAll('#match-grid .mcard.open').length,
+          ghost: document.querySelectorAll('.mcard-ghost').length
+        }));
+        ok('S13-① 失配锁定（对数 0/8 · 开牌 2 · 无 ghost 残留）', mismatchState.pairs.indexOf('0/8') >= 0 && mismatchState.openN === 2 && mismatchState.ghost === 0, JSON.stringify(mismatchState));
+        ok('S13-① 失配后焦点不落 BODY（' + (await aeDesc()) + '）', (await aeDesc()) !== 'BODY', await aeDesc());
+        await sleep(850);   // 等弹回（750ms 锁定）
+        const bounced = await page.evaluate(() => ({ openN: document.querySelectorAll('#match-grid .mcard.open').length, locked: !match || match.lock }));
+        ok('S13-① 0.75s 后弹回复位（开牌 ' + bounced.openN + ' · 解锁）', bounced.openN === 0 && !bounced.locked, JSON.stringify(bounced));
+        // ② 拖拽撞击配对：pointerdown→move 序→pointerup 落到同词异类卡
+        st = await findPairIdx();
+        await page.evaluate(({ wi, di }) => {
+          const cards = document.querySelectorAll('#match-grid .mcard');
+          const rect = el => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+          const a = rect(cards[wi]), b = rect(cards[di]);
+          const o = p => ({ bubbles: true, cancelable: true, pointerId: 21, pointerType: 'touch', isPrimary: true, clientX: p.x, clientY: p.y });
+          const grid = document.getElementById('match-grid');
+          cards[wi].dispatchEvent(new PointerEvent('pointerdown', o(a)));
+          for (let k = 1; k <= 3; k++) grid.dispatchEvent(new PointerEvent('pointermove', o({ x: a.x + (b.x - a.x) * k / 3, y: a.y + (b.y - a.y) * k / 3 })));
+          cards[di].dispatchEvent(new PointerEvent('pointerup', o(b)));
+        }, { wi: st.wi, di: st.di });
+        await sleep(250);
+        let ps = await pairsState();
+        ok('S13-② 拖拽撞击配对成功（' + ps + '）', ps.indexOf('1/8') >= 0, ps);
+        ok('S13-② 拖拽配对后焦点不落 BODY（' + (await aeDesc()) + '）', (await aeDesc()) !== 'BODY', await aeDesc());
+        // ③ pointercancel 中断拖拽：ghost 清理、局面可继续
+        const cancelSt = await page.evaluate(() => {
+          const cards = document.querySelectorAll('#match-grid .mcard');
+          const free = Array.prototype.findIndex.call(cards, c => !c.classList.contains('done'));
+          const r = cards[free].getBoundingClientRect();
+          const o = { bubbles: true, cancelable: true, pointerId: 31, pointerType: 'touch', isPrimary: true, clientX: r.left + 8, clientY: r.top + 8 };
+          cards[free].dispatchEvent(new PointerEvent('pointerdown', o));
+          document.getElementById('match-grid').dispatchEvent(new PointerEvent('pointermove', Object.assign({}, o, { clientX: o.clientX + 46, clientY: o.clientY + 30 })));
+          const during = document.querySelectorAll('.mcard-ghost').length;
+          document.getElementById('match-grid').dispatchEvent(new PointerEvent('pointercancel', o));
+          return { during: during, after: document.querySelectorAll('.mcard-ghost').length };
+        });
+        await sleep(200);
+        ok('S13-③ pointercancel 清 ghost（中 ' + cancelSt.during + ' → 后 ' + cancelSt.after + '）', cancelSt.during === 1 && cancelSt.after === 0, JSON.stringify(cancelSt));
+        // ④ tap 翻牌逐对推进到收官（每次配对后焦点不落 BODY）
+        for (let round = 0; round < 10; round++) {
+          const p2 = await findPairIdx();
+          if (!p2 || p2.di < 0) break;
+          await tapCard(p2.wi);
+          await sleep(240);
+          await tapCard(p2.di);
+          await sleep(230);
+          const d = await aeDesc();
+          if (d === 'BODY') { ok('S13-④ 第 ' + (round + 1) + ' 对 tap 配对后焦点不落 BODY', false, 'BODY'); break; }
+          ps = await pairsState();
+          if (ps.indexOf('8/8') >= 0) break;
+        }
+        ps = await pairsState();
+        ok('S13-④ tap 流程打完整盘（' + ps + '）', ps.indexOf('8/8') >= 0, ps);
+        // ⑤ 收官：焦点到「再来一局」，tap 续局开出新盘
+        const finDesc = await aeDesc();
+        ok('S13-⑤ 收官焦点在「再来一局」（' + finDesc + '）', await page.evaluate(() => document.activeElement === document.getElementById('btn-match-restart')), finDesc);
+        await page.tap('#btn-match-restart');
+        await sleep(450);
+        ps = await pairsState();
+        ok('S13-⑤ 续局新盘（' + ps + '）', ps.indexOf('0/8') >= 0, ps);
+        ok('S13-⑤ 续局后焦点不落 BODY（' + (await aeDesc()) + '）', (await aeDesc()) !== 'BODY', await aeDesc());
+        ok('S13 无页面异常（pageerror=0）', c13.errors.length === 0, c13.errors.join(' | '));
+        await c13.context.close();
       }
 
       /* ============ S-PERF · 性能预算基线（本地服务 · 每轮对比） ============ */
