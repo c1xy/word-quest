@@ -575,6 +575,208 @@ console.log('---- F. 词境码/参数边界 ----');
   env.__realmCheckboxes = [];
 })();
 
+/* ================= G. 存档迁移矩阵（第 13 轮：历史存档形态逐一走真实 loadSave 通道）
+   覆盖四种历史形态：G1 v1 时代核心字段档（无 xp/talents/poisonLog 等后期字段）/
+   G2 中间时代档（有 xp/talents，缺 poisonLog/rogue/duel 等）/ G3 损坏 JSON /
+   G4 字段类型错误脏档；另 G5 现代全字段档往返保真。
+   每种形态断言三件事：字段补全（defaultSave 每键都在且类型一致）、
+   成就不误触（checkAch 只按真实进度解锁）、进度保留（旧值不丢）。 ================= */
+console.log('---- G. 存档迁移矩阵 ----');
+(function () {
+  /* 走真实通道：写入桩 localStorage → loadSave（JSON.parse + sanitizeSave） */
+  function loadHistorical(raw) {
+    LS.setItem('wq_save_v1', raw);
+    const s = env.xSave.loadSave();
+    LS.removeItem('wq_save_v1');
+    return s;
+  }
+  /* 字段补全：defaultSave 的每个顶层键都在迁移结果里，且类型一致
+     （number/boolean/string/数组/对象；默认 null 的键允许 null 或对象） */
+  function schemaHole(s) {
+    const d = defaultSave();
+    const keys = Object.keys(d);
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i], dv = d[k], sv = s[k];
+      if (dv === null) { if (sv !== null && typeof sv !== 'object') return k + '(null档)'; continue; }   // lastLists=null|数组 / poisonIssued=null|对象
+      if (dv instanceof Array) { if (!(sv instanceof Array)) return k + '(须数组)'; continue; }
+      if (typeof dv === 'number') { if (typeof sv !== 'number' || !isFinite(sv)) return k + '(须数值)'; continue; }
+      if (typeof dv === 'boolean') { if (typeof sv !== 'boolean') return k + '(须布尔)'; continue; }
+      if (typeof dv === 'string') { if (typeof sv !== 'string') return k + '(须字符串)'; continue; }
+      if (!sv || typeof sv !== 'object' || sv instanceof Array) return k + '(须对象)';
+    }
+    return null;
+  }
+  /* 迁移结果装进共享 save（切片内顶层 var，checkAch 读它），返回装好的引用 */
+  function install(s) {
+    const shared = env.xState.getSave();
+    Object.keys(shared).forEach(function (k) { delete shared[k]; });
+    Object.keys(s).forEach(function (k) { shared[k] = s[k]; });
+    return shared;
+  }
+  function achKeys() { return Object.keys(env.xState.getSave().ach).sort().join(','); }
+
+  /* ---- G1: v1 时代核心字段档（无 xp/level/talentPts/talents/poisonLog/poisonIssued/
+          rogue/duel/wrongBook/sessionSize/expedition/modsSeen/unit/plan/planDay/dailyLog/
+          confuse/firstRun/stats 新字段——全部为后期追加） ---- */
+  const M1 = {
+    coins: 120,
+    upgrades: { hp: 2, time: 1, shield: 0, coin: 1 },
+    mastery: { abandon: { lv: 3, seen: 5, ok: 4, wrong: 1, last: 1700000000000, due: 0, wrongStreak: 0 } },
+    streak: { count: 2, last: '2026-01-01', todayCount: 1 },
+    best: { adventure: 6, endless: 12 },
+    settings: { sound: true, autoplay: true, rate: 0.9, qtypes: { c2e: true, e2c: false, spell: false, listen: false } },
+    customLists: [],
+    lastLists: ['cet4'],
+    lastDiff: 'normal',
+    daily: { date: '2026-01-01', tasks: [{ id: 'answer10', prog: 3, goal: 10, done: false, claimed: false }] },
+    ach: {}, pets: {}, pet: '',
+    stats: { kills: 0, bosses: 0, spellOk: 0, listenOk: 0, runs: 2, dailyDone: 0, maxCombo: 4, perfects: 0, packDone: 0, labN: 0, labOk: 0, expWins: 0, packDoneMap: {} }
+  };
+  const m1 = loadHistorical(JSON.stringify(M1));
+  T('G1a v1 档字段补全：defaultSave 每键都在且类型一致', schemaHole(m1) === null, schemaHole(m1));
+  T('G1b v1 缺失后期字段补默认值（xp/天赋/毒池/肉鸽/对决/错题本）',
+    m1.xp === 0 && m1.level === 1 && m1.talentPts === 0 && JSON.stringify(m1.talents) === '{}' &&
+    m1.poisonLog.length === 0 && m1.poisonIssued === null &&
+    m1.rogue.runs === 0 && m1.rogue.wins === 0 && Object.keys(m1.rogue.cursesSeen).length === 0 &&
+    m1.duel.plays === 0 && Object.keys(m1.wrongBook).length === 0 && m1.sessionSize === 10 &&
+    m1.modsSeen && Object.keys(m1.modsSeen).length === 0 && m1.expedition.best === 0);
+  T('G1c v1 进度保留：金币/升级/掌握/最佳/连击/词表选择',
+    m1.coins === 120 && m1.upgrades.hp === 2 && m1.upgrades.coin === 1 &&
+    m1.mastery.abandon.lv === 3 && m1.mastery.abandon.ok === 4 &&
+    m1.best.adventure === 6 && m1.best.endless === 12 && m1.streak.count === 2 &&
+    JSON.stringify(m1.lastLists) === '["cet4"]' && m1.stats.runs === 2 && m1.stats.maxCombo === 4 &&
+    m1.daily.tasks.length === 1 && m1.daily.tasks[0].id === 'answer10');
+  install(m1);
+  checkAch();
+  T('G1d v1 档成就不误触：零击杀/零 BOSS/无毒池记录 → 一个成就都不解锁', achKeys() === '', achKeys());
+
+  /* ---- G2: 中间时代档（有 xp/level/talentPts/talents/pets，仍缺 poisonLog/
+          poisonIssued/rogue/duel/wrongBook/expedition/modsSeen/sessionSize/unit 等后期字段） ---- */
+  const M2 = {
+    coins: 300, xp: 350, level: 4, talentPts: 2, talents: { calm: 1, magnet: 2 },
+    mastery: { abandon: { lv: 2, seen: 3, ok: 2, wrong: 1, last: 1700000000000, due: 1700000100000, wrongStreak: 1 },
+               ability: { lv: 5, seen: 9, ok: 9, wrong: 0, last: 1700000000000, due: 0, wrongStreak: 0, ease: 2.2 } },
+    streak: { count: 2, last: '2026-02-01', todayCount: 0 },
+    best: { adventure: 12, endless: 30 },
+    settings: { sound: false, autoplay: true, rate: 1.1, qtypes: { c2e: true, e2c: true, spell: false, listen: false } },
+    customLists: [{ id: 'mylist', name: '我的词库', desc: '', words: [['abandon', 'v. 放弃']] }],
+    lastLists: ['cet4', 'mylist'],
+    lastDiff: 'nightmare',
+    daily: { date: '', tasks: [] },
+    ach: { first_blood: 1, boss1: 1 },
+    pets: { sparky: 1 }, pet: 'sparky',
+    stats: { kills: 40, bosses: 3, spellOk: 10, listenOk: 5, runs: 25, dailyDone: 2, maxCombo: 8, perfects: 0, packDone: 0, labN: 0, labOk: 0, expWins: 0, packDoneMap: {} }
+  };
+  const m2 = loadHistorical(JSON.stringify(M2));
+  T('G2a 中代档字段补全', schemaHole(m2) === null, schemaHole(m2));
+  T('G2b 中代缺失字段补默认（毒池/肉鸽/对决/错题本/远征/词缀档案）',
+    m2.poisonLog.length === 0 && m2.poisonIssued === null && m2.rogue.runs === 0 &&
+    m2.duel.plays === 0 && Object.keys(m2.wrongBook).length === 0 && m2.expedition.best === 0 &&
+    Object.keys(m2.modsSeen).length === 0 && m2.sessionSize === 10 && Object.keys(m2.unit).length === 0 &&
+    m2.plan.target === 10 && Object.keys(m2.dailyLog).length === 0 && Object.keys(m2.confuse).length === 0);
+  T('G2c 中代进度保留：xp/等级/天赋点/天赋等级/宠物/难度/自定义词库',
+    m2.xp === 350 && m2.level === 4 && m2.talentPts === 2 && m2.talents.calm === 1 && m2.talents.magnet === 2 &&
+    m2.pet === 'sparky' && m2.pets.sparky === 1 && m2.lastDiff === 'nightmare' &&
+    m2.customLists.length === 1 && m2.customLists[0].words[0][0] === 'abandon' &&
+    m2.mastery.ability.lv === 5 && m2.mastery.ability.ease === 2.2 && m2.settings.sound === false);
+  install(m2);
+  const coinsBefore = env.xState.getSave().coins;
+  checkAch();
+  T('G2d 中代成就只按真实进度补解锁（宠物→pet1、冒险最佳12→stage10；已解锁不重复）',
+    achKeys() === 'boss1,first_blood,pet1,stage10', achKeys());
+  T('G2e 中代不发 phantom 成就：xp350/天赋3级 不够 lv5·talent5，无毒记录不触 poison_*',
+    env.xState.getSave().ach.lv5 === undefined && env.xState.getSave().ach.talent5 === undefined &&
+    env.xState.getSave().ach.poison_set === undefined && env.xState.getSave().ach.poison_win === undefined &&
+    env.xState.getSave().ach.rogue1 === undefined && env.xState.getSave().ach.duel1 === undefined);
+  T('G2f 已解锁成就不重复加币（新解锁 pet1+stage10 各 +20）', env.xState.getSave().coins === coinsBefore + 40,
+    coinsBefore + ' -> ' + env.xState.getSave().coins);
+
+  /* ---- G3: 损坏 JSON（截断/乱码/合法 JSON 但非对象/空串——全部自愈不炸启动） ---- */
+  const brokenPayloads = ['{broken json!!', '{"coins": 99, "mastery":', '"a json string"', 'null', '42', ''];
+  let g3ok = true, g3detail = '';
+  for (let bi = 0; bi < brokenPayloads.length; bi++) {
+    let s = null, threw = '';
+    try { s = loadHistorical(brokenPayloads[bi]); } catch (e) { threw = e.message; }
+    const hole = s ? schemaHole(s) : '(未产出存档)';
+    const isDefault = s && s.coins === 0 && s.level === 1 && s.xp === 0 && Object.keys(s.mastery).length === 0 && s.firstRun === true;
+    if (threw || hole || !isDefault) { g3ok = false; g3detail = JSON.stringify(brokenPayloads[bi]) + ' threw=' + threw + ' hole=' + hole; break; }
+  }
+  T('G3a 损坏 JSON ×6 全部自愈为可玩新档（不抛异常/字段补全/firstRun=true 弹引导）', g3ok, g3detail);
+  install(loadHistorical('{broken json!!'));
+  checkAch();
+  T('G3b 自愈新档成就不误触', achKeys() === '', achKeys());
+
+  /* ---- G4: 字段类型错误脏档（每字段都放错形值：字符串数组 null 负数） ---- */
+  const M4 = {
+    coins: -50, xp: 'three hundred', level: -5, talentPts: null, talents: 'abc',
+    poisonLog: { zero: 1 }, poisonIssued: 42, mastery: 'all my words',
+    upgrades: [1, 2, 3], streak: 'no', best: { adventure: 'high', endless: -9 },
+    settings: { rate: 'fast', qtypes: 'all' }, sessionSize: 'lots', firstRun: 'no',
+    rogue: [], duel: 'none', wrongBook: [1], modsSeen: null, unit: 'unit3',
+    customLists: 'lists', lastLists: 'cet4', daily: 'yesterday', plan: 'ten', planDay: null,
+    expedition: 3, pets: 'cat', pet: 7, lastDiff: 9, unitMode: 3, unitList: 4,
+    ach: 'all', dailyLog: 'log', confuse: 'confused',
+    stats: { kills: 'many', packDoneMap: [1] }
+  };
+  const m4 = loadHistorical(JSON.stringify(M4));
+  T('G4a 脏档字段补全', schemaHole(m4) === null, schemaHole(m4));
+  T('G4b 错形字段全部兜底默认（负值夹 0 / 错型取默认 / 数组对象拒收）',
+    m4.coins === 0 && m4.xp === 0 && m4.level === 1 && m4.talentPts === 0 &&
+    JSON.stringify(m4.talents) === '{}' && m4.poisonLog.length === 0 && m4.poisonIssued === null &&
+    Object.keys(m4.mastery).length === 0 && m4.upgrades.hp === 0 && m4.upgrades.coin === 0 &&
+    m4.streak.count === 0 && m4.best.adventure === 0 && m4.best.endless === 0 &&
+    m4.settings.rate === 0.9 && m4.settings.qtypes.c2e === true && m4.settings.qtypes.e2c === false &&
+    m4.sessionSize === 10 && JSON.stringify(m4.rogue) === JSON.stringify({ runs: 0, wins: 0, bestChain: 0, cursesSeen: {} }) &&
+    m4.duel.plays === 0 && Object.keys(m4.wrongBook).length === 0 && Object.keys(m4.modsSeen).length === 0 &&
+    Object.keys(m4.unit).length === 0 && m4.unitMode === 'none' && m4.unitList === 'cet4' &&
+    m4.customLists.length === 0 && m4.lastLists === null && m4.pet === '' && Object.keys(m4.pets).length === 0 &&
+    Object.keys(m4.ach).length === 0 && m4.lastDiff === 'normal' && m4.stats.kills === 0 &&
+    Object.keys(m4.stats.packDoneMap).length === 0 && m4.plan.target === 10 &&
+    Object.keys(m4.expedition).length === 3 && m4.firstRun === false);
+  install(m4);
+  checkAch();
+  T('G4c 脏档成就不误触：垃圾毒日志/垃圾等级不触发 poison_set·lv5', achKeys() === '', achKeys());
+
+  /* ---- G5: 现代全字段档往返保真（迁移不回退新字段，成就按真实战绩精确补齐） ---- */
+  const M5 = defaultSave();
+  M5.coins = 520; M5.xp = 1200; M5.level = 7; M5.talentPts = 1;
+  M5.talents = { vigor: 2, will: 1 };
+  M5.mastery = { abandon: { lv: 5, seen: 12, ok: 11, wrong: 1, last: 1700000000000, due: 1700000200000, wrongStreak: 0, ease: 2.3 } };
+  M5.wrongBook = { absorb: { n: 2, t: 1700000000000 } };
+  M5.poisonLog = [
+    { role: 'set', words: ['abandon'], cleared: 0, total: 5, win: false, pending: true, t: 1700000000000 },
+    { role: 'play', words: ['ability'], cleared: 5, total: 5, win: true, t: 1700000100000 }
+  ];
+  M5.poisonIssued = { words: ['abandon'], boss: 'rage', t: 1700000000000 };
+  M5.rogue = { runs: 3, wins: 1, bestChain: 4, cursesSeen: { frail: 1, greedy: 1 } };
+  M5.duel = { plays: 5, p1wins: 2, p2wins: 1 };
+  M5.modsSeen = { rage: 1, timed: 1 };
+  M5.expedition = { date: '2026-03-01', best: 88, clearDate: '2026-03-01' };
+  M5.stats.packDoneMap = { packA: 1 };
+  M5.unit = { cet4: 3 }; M5.unitMode = 'auto'; M5.unitList = 'cet4';
+  M5.sessionSize = 15; M5.firstRun = false;
+  const m5 = loadHistorical(JSON.stringify(M5));
+  T('G5a 全字段档字段补全', schemaHole(m5) === null, schemaHole(m5));
+  T('G5b 全字段档往返保真：等级/天赋/毒池日志(pending)/肉鸽/对决/远征/单元进度',
+    m5.coins === 520 && m5.xp === 1200 && m5.level === 7 && m5.talents.vigor === 2 && m5.talents.will === 1 &&
+    m5.mastery.abandon.ease === 2.3 && m5.wrongBook.absorb.n === 2 &&
+    m5.poisonLog.length === 2 && m5.poisonLog[0].pending === true && m5.poisonLog[1].role === 'play' && m5.poisonLog[1].win === true &&
+    m5.poisonIssued.words.length === 1 && m5.rogue.runs === 3 && m5.rogue.wins === 1 && m5.rogue.bestChain === 4 &&
+    Object.keys(m5.rogue.cursesSeen).length === 2 && m5.duel.plays === 5 && m5.duel.p1wins === 2 &&
+    m5.modsSeen.rage === 1 && m5.expedition.best === 88 && m5.expedition.clearDate === '2026-03-01' &&
+    m5.stats.packDoneMap.packA === 1 && m5.unit.cet4 === 3 && m5.unitMode === 'auto' &&
+    m5.sessionSize === 15 && m5.firstRun === false);
+  install(m5);
+  checkAch();
+  T('G5c 全字段档成就精确补齐（真实战绩 8 项：rich/lv5/poison_set/poison_win/rogue1/rogue_win/duel1/duel_win）',
+    achKeys() === 'duel1,duel_win,lv5,poison_set,poison_win,rich,rogue1,rogue_win', achKeys());
+  T('G5d 成就不多不少：不误触 rogue_chain(连锁4)/rogue_curse(诅咒2)/mod_all(词缀2)/talent5(3级)',
+    m5.ach.rogue_chain === undefined && m5.ach.rogue_curse === undefined &&
+    m5.ach.mod_all === undefined && m5.ach.talent5 === undefined && m5.ach.master50 === undefined);
+
+  LS.removeItem('wq_save_v1');
+})();
+
 /* ================= 汇总 ================= */
 console.log('========================================');
 console.log('unit: PASS ' + pass + ' / FAIL ' + fail);

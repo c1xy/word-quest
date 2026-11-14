@@ -1,6 +1,6 @@
 /* 单词大冒险 · Service Worker（网络优先，离线回落缓存） */
 'use strict';
-var CACHE = 'wq-cache-v26';
+var CACHE = 'wq-cache-v27';
 
 /* ── 发布更新清单（缺一不可，否则回访用户首次刷新可能新旧混版）──────────
    1) bump 上面的 CACHE 版本号（v15 → v16 …）：旧 SW 缓存整体作废重建；
