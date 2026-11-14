@@ -9,6 +9,9 @@
      S6 听写挑战（headless 无语音包自动降级首字母；无麦克风跟读行自动隐藏 = graceful skip）
      S7 七种结算结构断言（冒险/无尽/复习/远征/听写/词魂肉鸽/毒池）
      S8 R11 一致性回归（io 弹层按钮组随模式自适应 / Esc 逃生通道 / 图鉴返回刷新主页 chips）
+     S9 键盘可达性（Tab 序列含四组入口 / Enter 激活 / div 卡片可聚焦+Enter / 弹层焦点管理+Esc）
+     S10 色弱冗余标记（词性文字徽标 / ✓✕ 字形 / 对错色 protan-deutan 投影距离阈值）
+     S11 触屏目标 ≥44px（四组 IA 每个按钮 + 设置/图鉴/战斗实测 rect；checkbox 取 label 命中区）
      S-PERF 性能预算（本地服务：主页加载 ≤3s、首次可交互 ≤5s、JS heap 采样入 PERF-BASELINE 行）
    依赖：playwright 或 playwright-core（找不到时整组 SKIP，退出码 0 并说明原因），
    浏览器可执行文件依次探测 playwright 自带 chromium → 环境变量 WQ_CHROME_PATH →
@@ -805,6 +808,265 @@ if (!resolvable) {
         ok('S8-③ 返回主页「已掌握」chips 同步（' + chipBefore + ' → ' + chipAfter + '，无 reload）', String(chipAfter) === String(savedN) && String(chipAfter) !== String(chipBefore), 'chip=' + chipAfter);
         ok('S8 无页面异常（pageerror=0）', c8.errors.length === 0, c8.errors.join(' | '));
         await c8.context.close();
+      }
+
+      /* ============ S9 · 键盘可达性（Tab 序 / Enter 激活 / div 卡片 / 弹层焦点） ============ */
+      console.log('---- S9 键盘可达性 ----');
+      {
+        const c9 = await newContext(browser);
+        const page = c9.page;
+        await gotoHome(page);
+        await sleep(300);
+        // ① 主页 Tab 序列覆盖四组 IA 12 入口 + 工具行（DOM 顺序 = 视觉顺序）
+        const ids = [];
+        for (let i = 0; i < 40; i++) {
+          await page.keyboard.press('Tab');
+          const cur = await page.evaluate(() => document.activeElement.id || '');
+          if (!cur) break;
+          if (ids.indexOf(cur) < 0) ids.push(cur); else break;   // 循环回起点即收
+        }
+        const need9 = ['btn-adventure', 'btn-rogue', 'btn-expedition', 'btn-lab', 'btn-dict', 'btn-poison',
+          'btn-duel', 'btn-realm', 'btn-packs', 'btn-endless', 'btn-review', 'btn-match',
+          'btn-wrongbook', 'btn-codex', 'btn-ach', 'btn-talent', 'btn-settings', 'btn-help', 'btn-feedback'];
+        const missing9 = need9.filter(id => ids.indexOf(id) < 0);
+        ok('S9-① 主页 Tab 序列含四组 IA 12 入口 + 工具行（缺 ' + missing9.length + '）', missing9.length === 0, missing9.join(','));
+        // ② Enter 激活（四组入口之一：词魂肉鸽）
+        await page.focus('#btn-rogue');
+        await page.keyboard.press('Enter');
+        let enterOk = false;
+        try { await page.waitForSelector('#scr-rogue.active', { timeout: 4000 }); enterOk = true; } catch (e) {}
+        ok('S9-② 焦点 + Enter 激活 btn-rogue → scr-rogue', enterOk);
+        await page.click('#btn-rogue-back');
+        await backHome(page);
+        // ③ 图鉴词行（div）可聚焦 + Enter 打开详情卡 + Esc 关闭 + 焦点归还
+        await page.click('#btn-codex');
+        await page.waitForSelector('#scr-codex.active', { timeout: 5000 });
+        await sleep(400);
+        const cx = await page.evaluate(() => {
+          const row = document.querySelector('#codex-list .cx-row');
+          if (!row) return null;
+          row.focus();
+          return { focused: document.activeElement === row, tabindex: row.getAttribute('tabindex'), role: row.getAttribute('role') };
+        });
+        ok('S9-③ 图鉴词行可聚焦（tabindex=0 role=button）', !!cx && cx.focused && cx.tabindex === '0' && cx.role === 'button', JSON.stringify(cx));
+        await page.keyboard.press('Enter');
+        let cxOpen = false;
+        try { await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 4000 }); cxOpen = true; } catch (e) {}
+        ok('S9-③ 词行 Enter → 单词详情卡打开', cxOpen);
+        const focusIn = await page.evaluate(() => !!document.activeElement.closest('#word-overlay'));
+        ok('S9-③ 弹层打开后焦点已移入弹层（免 Tab 穿背景页）', focusIn);
+        await page.keyboard.press('Escape');
+        await sleep(200);
+        const cxBack = await page.evaluate(() => ({
+          closed: document.getElementById('word-overlay').hidden,
+          backCls: String(document.activeElement.className || '')
+        }));
+        ok('S9-③ Esc 关闭词详情卡（弹层补逃生通道）', cxBack.closed);
+        ok('S9-③ 关闭后焦点归还触发词行', cxBack.backCls.indexOf('cx-row') >= 0, cxBack.backCls);
+        await page.click('#btn-codex-back');
+        await backHome(page);
+        // ④ 记忆配对卡（div）可聚焦 + Enter 翻牌
+        await page.click('#btn-match');
+        await page.waitForSelector('#scr-match.active', { timeout: 5000 });
+        await sleep(350);
+        const mc = await page.evaluate(() => {
+          const c = document.querySelector('#match-grid .mcard');
+          if (!c) return null;
+          c.focus();
+          return { focused: document.activeElement === c, tabindex: c.getAttribute('tabindex'), role: c.getAttribute('role') };
+        });
+        ok('S9-④ 配对卡可聚焦（tabindex=0 role=button）', !!mc && mc.focused && mc.tabindex === '0' && mc.role === 'button', JSON.stringify(mc));
+        await page.keyboard.press('Enter');
+        await sleep(350);
+        const mcOpen = await page.evaluate(() => {
+          const c = document.querySelector('#match-grid .mcard');
+          return c && c.className.indexOf('open') >= 0;
+        });
+        ok('S9-④ 配对卡 Enter → 翻牌（open 类挂上）', mcOpen === true);
+        await page.click('#btn-match-back');
+        await backHome(page);
+        // ⑤ 肉鸽天赋三选一（div 卡）键盘锁定
+        await page.click('#btn-rogue');
+        await page.waitForSelector('#scr-rogue.active', { timeout: 5000 });
+        await page.click('#btn-rogue-start');
+        await page.waitForSelector('[data-rogue-t]', { timeout: 5000 });
+        const rc = await page.evaluate(() => {
+          const c = document.querySelector('[data-rogue-t]');
+          c.focus();
+          return { focused: document.activeElement === c, tabindex: c.getAttribute('tabindex'), role: c.getAttribute('role'), id: c.getAttribute('data-rogue-t') };
+        });
+        ok('S9-⑤ 肉鸽天赋卡可聚焦（tabindex=0 role=button）', !!rc && rc.focused && rc.tabindex === '0' && rc.role === 'button', JSON.stringify(rc));
+        await page.keyboard.press('Enter');
+        await sleep(250);
+        const rcPick = await page.evaluate(id0 => (typeof rogueDraft !== 'undefined' && rogueDraft) ? rogueDraft.talent === id0 : false, rc ? rc.id : '');
+        ok('S9-⑤ 天赋卡 Enter → 锁定（rogueDraft.talent 命中）', rcPick === true);
+        await page.click('#btn-rogue-back');
+        await backHome(page);
+        // ⑥ io 弹层焦点管理：打开即入弹层，Esc 关闭归还触发按钮
+        await page.click('#btn-settings');
+        await page.waitForSelector('#scr-settings.active', { timeout: 5000 });
+        await page.click('#btn-import');
+        await page.waitForSelector('#io-overlay:not([hidden])', { timeout: 5000 });
+        const ioIn = await page.evaluate(() => ({
+          inOverlay: !!document.activeElement.closest('#io-overlay'),
+          id: document.activeElement.id || document.activeElement.tagName
+        }));
+        ok('S9-⑥ io 弹层打开后焦点入弹层（' + ioIn.id + '）', ioIn.inOverlay);
+        await page.keyboard.press('Escape');
+        await sleep(200);
+        const ioBack = await page.evaluate(() => ({
+          closed: document.getElementById('io-overlay').hidden,
+          focusId: document.activeElement.id || ''
+        }));
+        ok('S9-⑥ Esc 关闭 io 弹层且焦点归还 #btn-import', ioBack.closed && ioBack.focusId === 'btn-import', JSON.stringify(ioBack));
+        ok('S9 无页面异常（pageerror=0）', c9.errors.length === 0, c9.errors.join(' | '));
+        await c9.context.close();
+      }
+
+      /* ============ S10 · 色弱冗余标记（词性徽标 / ✓✕ 字形 / 投影距离） ============ */
+      console.log('---- S10 色弱冗余标记 ----');
+      {
+        const seed10 = baseSave();
+        seed10.settings = { sound: true, autoplay: false, bgm: false, rate: 0.9, qtypes: { c2e: true, e2c: true, spell: false, listen: false } };
+        const c10 = await newContext(browser, seed10);
+        const page = c10.page;
+        await gotoHome(page);
+        await startBattleFromSetup(page, 'adventure');
+        // ① 词性文字徽标：与出题词词性一致（BOSS / 无词性词隐藏 = 正确降级）
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked
+          && document.querySelectorAll('#q-options .q-opt').length >= 2, { timeout: 15000 });
+        await sleep(200);
+        const posChk = await page.evaluate(() => {
+          var POS_TXT = { n: '名词', v: '动词', adj: '形容词', adv: '副词', prep: '虚词', conj: '虚词', pron: '虚词' };
+          var el = document.getElementById('monster-pos');
+          var pos = run.q && run.q.word ? posOf(run.q.word.m) : '';
+          var boss = run.monster ? !!run.monster.boss : false;
+          return {
+            hidden: el ? el.hidden : null, text: el ? el.textContent : null,
+            want: POS_TXT[pos] || null, boss: boss
+          };
+        });
+        if (posChk.boss || !posChk.want) {
+          ok('S10-① 词性徽标正确降级（BOSS/无词性词 → 隐藏）', posChk.hidden === true, JSON.stringify(posChk));
+        } else {
+          ok('S10-① 词性徽标在位且文字=词性（' + posChk.text + '）', posChk.hidden === false && posChk.text === posChk.want, JSON.stringify(posChk));
+        }
+        // ② 故意答错一题：correct/wrong 选项各带 ✓ / ✕ 字形（形状冗余，不依赖色觉）
+        const st10 = await page.evaluate(() => ({
+          opts: Array.from(document.querySelectorAll('#q-options .q-opt')).map(b => b.textContent.replace(/^[0-9]+/, '').trim()),
+          qtype: run.q.type,
+          word: run.q.word ? run.q.word.w : null,
+          meaning: run.q.word ? run.q.word.m : null
+        }));
+        const wrongIdx = Math.max(0, st10.opts.findIndex(o => o !== (st10.qtype === 'e2c' ? st10.meaning : st10.word)));
+        await page.click('#q-options .q-opt >> nth=' + wrongIdx);
+        await sleep(300);
+        const marks = await page.evaluate(() => {
+          const pick = cls => {
+            const el = document.querySelector('#q-options .' + cls);
+            return el ? { glyph: getComputedStyle(el, '::before').content, border: getComputedStyle(el).borderTopColor } : null;
+          };
+          return { correct: pick('correct'), wrong: pick('wrong') };
+        });
+        ok('S10-② 正确选项带 ✓ 字形冗余标记', !!marks.correct && String(marks.correct.glyph).indexOf('✓') >= 0, JSON.stringify(marks.correct));
+        ok('S10-② 选错选项带 ✕ 字形冗余标记', !!marks.wrong && String(marks.wrong.glyph).indexOf('✕') >= 0, JSON.stringify(marks.wrong));
+        // ③ 数值投影：对错状态色经 protanopia/deuteranopia 矩阵投影后仍可区分（阈值 40/765）
+        const projDist = await page.evaluate(() => {
+          var PROT = [0.152286, 1.052583, -0.204868, 0.114503, 0.786281, 0.099216, -0.003882, -0.048116, 1.051998];
+          var DEUT = [0.367322, 0.860646, -0.227968, 0.280085, 0.672501, 0.047413, -0.011820, 0.042940, 0.968881];
+          var hex2 = s => [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)];
+          var proj = (rgb, m) => [0, 1, 2].map(i => Math.max(0, Math.min(255, m[i * 3] * rgb[0] + m[i * 3 + 1] * rgb[1] + m[i * 3 + 2] * rgb[2])));
+          var dst = (a, b) => Math.round(Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2));
+          var good = hex2(getComputedStyle(document.documentElement).getPropertyValue('--c-good').trim());
+          var badc = hex2(getComputedStyle(document.documentElement).getPropertyValue('--c-bad').trim());
+          return { protan: dst(proj(good, PROT), proj(badc, PROT)), deutan: dst(proj(good, DEUT), proj(badc, DEUT)) };
+        });
+        ok('S10-③ 对错色 protan 投影距离 ≥40（实际 ' + projDist.protan + '）', projDist.protan >= 40, JSON.stringify(projDist));
+        ok('S10-③ 对错色 deutan 投影距离 ≥40（实际 ' + projDist.deutan + '，✓✕ 字形为冗余兜底）', projDist.deutan >= 40, JSON.stringify(projDist));
+        /* 清场：关掉记忆卡让战斗继续，撤退进结算结束本局 */
+        await page.waitForFunction(() => !document.getElementById('memcard').hidden, { timeout: 8000 }).catch(() => {});
+        await page.click('#mem-ok').catch(() => {});
+        await sleep(300);
+        await quitBattle(page);
+        await waitResult(page, 15000);
+        ok('S10 无页面异常（pageerror=0）', c10.errors.length === 0, c10.errors.join(' | '));
+        await c10.context.close();
+      }
+
+      /* ============ S11 · 触屏目标 ≥44px（实测 rect；checkbox/radio 取 label 命中区） ============ */
+      console.log('---- S11 触屏目标 ≥44px ----');
+      {
+        const c11 = await newContext(browser, baseSave(), { touch: true });
+        const page = c11.page;
+        await gotoHome(page);
+        await sleep(400);
+        /* 收集当前页全部可交互元素的命中区 rect（弹层内元素也含；checkbox/radio 用包裹
+           label 的 rect——触屏点的是 label；背景屏被弹层覆盖时不算可命中） */
+        const MEASURE = () => {
+          const els = document.querySelectorAll('button, a[href], input, select, textarea, [onclick], .cx-row, .mcard, .filter, [role="button"], .q-opt, .spell-chip');
+          const out = [];
+          const seen = new Set();
+          els.forEach(el => {
+            if (seen.has(el)) return; seen.add(el);
+            if (el.closest('[hidden]')) return;
+            const cs = getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return;
+            let r = el.getBoundingClientRect();
+            const wrapped = (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) ? el.closest('label') : null;
+            if (wrapped) r = wrapped.getBoundingClientRect();
+            if (r.width === 0 && r.height === 0) return;
+            if (!el.closest('.overlay') && !el.closest('.screen.active')) return;
+            out.push({ sel: (el.id ? '#' + el.id : '.' + String(el.className).trim().split(/\s+/).join('.')), w: Math.round(r.width), h: Math.round(r.height) });
+          });
+          return out;
+        };
+        const assert44 = (label, rects) => {
+          const small = rects.filter(r => Math.min(r.w, r.h) < 44);
+          ok('S11 ' + label + ' 全部交互目标 ≥44px（' + rects.length + ' 个，小 ' + small.length + '）', small.length === 0, JSON.stringify(small.slice(0, 6)));
+        };
+        // ① 四组 IA：菜单分组内每个按钮逐一实测（ask 指定规模）
+        const groupBtns = await page.evaluate(() => Array.from(document.querySelectorAll('.menu-group-body .btn')).map(b => {
+          const r = b.getBoundingClientRect();
+          return { id: b.id, w: Math.round(r.width), h: Math.round(r.height) };
+        }));
+        const smallGroup = groupBtns.filter(b => Math.min(b.w, b.h) < 44);
+        ok('S11-① 四组 IA ' + groupBtns.length + ' 个按钮逐一 ≥44px（' + groupBtns.map(b => b.id).join(',') + '）', groupBtns.length >= 9 && smallGroup.length === 0, JSON.stringify(groupBtns));
+        // ② 主页整页（含更多玩法行/工具行/chips 内按钮）
+        assert44('主页整页', await page.evaluate(MEASURE));
+        // ③ 出战设置
+        await page.click('#btn-adventure');
+        await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+        await sleep(300);
+        assert44('出战设置', await page.evaluate(MEASURE));
+        await page.click('#btn-start');
+        await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        // ④ 战斗页：等首题亮出再测（横幅期 q-options 未渲染会漏测）
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && document.querySelectorAll('#q-options .q-opt, #spell-chips .spell-chip').length > 0, { timeout: 15000 }).catch(() => {});
+        await sleep(300);
+        assert44('战斗页（首题亮出）', await page.evaluate(MEASURE));
+        await page.click('#btn-quit');
+        await page.waitForSelector('#scr-result.active', { timeout: 8000 });
+        assert44('结算页', await page.evaluate(MEASURE));
+        await page.click('#btn-result-home');
+        await backHome(page);
+        // ⑤ 图鉴 + 设置 + 词境（触屏 rect 最容易塌的三页）
+        await page.click('#btn-codex');
+        await page.waitForSelector('#scr-codex.active', { timeout: 5000 });
+        await sleep(350);
+        assert44('单词图鉴', await page.evaluate(MEASURE));
+        await page.click('#btn-codex-back');
+        await backHome(page);
+        await page.click('#btn-settings');
+        await page.waitForSelector('#scr-settings.active', { timeout: 5000 });
+        assert44('设置页', await page.evaluate(MEASURE));
+        await page.click('#btn-settings-back');
+        await backHome(page);
+        await page.click('#btn-realm');
+        await page.waitForSelector('#scr-realm.active', { timeout: 5000 });
+        await sleep(250);
+        assert44('词境工坊', await page.evaluate(MEASURE));
+        ok('S11 无页面异常（pageerror=0）', c11.errors.length === 0, c11.errors.join(' | '));
+        await c11.context.close();
       }
 
       /* ============ S-PERF · 性能预算基线（本地服务 · 每轮对比） ============ */

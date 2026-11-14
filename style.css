@@ -101,6 +101,9 @@ body {
 .btn-tiny { padding: 7px 12px; font-size: 14px; border-radius: var(--r-sm); }
 .btn.danger { background: linear-gradient(180deg, #ff7285, #c43048); }
 
+/* 键盘可达性：焦点可见（Tab 导航时高亮；鼠标/触点按下不触发，:focus-visible 由浏览器判定） */
+:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 2px; border-radius: 6px; }
+
 .menu-row { display: flex; gap: var(--sp-2); justify-content: center; margin-top: 18px; flex-wrap: wrap; }
 
 /* ---------- 主菜单分组（玩家旅程四组） ----------
@@ -263,6 +266,16 @@ body {
 .monster-hp-wrap { margin-bottom: 2px; }
 .monster-name { font-size: 12px; color: var(--c-sub); }
 .monster-name.boss-name { color: var(--c-bad); font-weight: 800; }
+/* 词性文字徽标（色弱冗余）：文字=信号本体，描边/字色=与光环同色的辅助线索；
+   game.js paintMonsterPos 驱动显隐与配色，BOSS/未知词性隐藏 */
+.monster-pos {
+  display: inline-block;
+  font-size: 10px; font-weight: 800; line-height: 1;
+  padding: 3px 8px; border-radius: 999px;
+  border: 1.5px solid rgba(255,255,255,.55); color: rgba(255,255,255,.8);
+  background: rgba(0,0,0,.30);
+  margin-left: 6px; vertical-align: 1px;
+}
 .monster-hp-bar {
   height: 8px; background: rgba(0,0,0,.4); border-radius: 999px;
   margin: 4px 0; overflow: hidden; border: 1px solid rgba(255,255,255,.12);
@@ -341,6 +354,12 @@ body {
   background: linear-gradient(180deg, rgba(255,93,115,.35), rgba(255,93,115,.12));
   border-color: var(--c-bad);
 }
+/* 色弱冗余标记：对错除颜色外再给形状/文字信号（✓ 正确 / ✕ 选错）——
+   deuteranopia 模拟下绿红背景色投影距离仅 ~53/765（protan 129），单靠色相不够冗余。
+   战斗/实验室/对决/超时揭示四处共用 .q-opt.correct/.wrong，标记一处生效四处。 */
+.q-opt.correct::before { content: '✓ '; font-weight: 900; }
+.q-opt.wrong::before { content: '✕ '; font-weight: 900; }
+.q-opt.correct { text-decoration: underline 2px; text-underline-offset: 3px; }
 .q-opt.dim { opacity: .25; pointer-events: none; }
 .q-options.locked .q-opt { pointer-events: none; }
 @keyframes optPop { 0% { transform: scale(.9); } 60% { transform: scale(1.06); } 100% { transform: scale(1); } }
@@ -614,6 +633,15 @@ body {
   .mcard { height: 62px; }
   .mcard-front { font-size: 12px; }
   .mcard-front.meaning { font-size: 10px; }
+  /* 触屏目标补齐（R12 实测 rect <44 的控件）：下拉 / 滑杆 / 图鉴词行 / 搜索框 /
+     词境引言输入框——滑杆抬高 input 本体高度（拇指命中区变大，轨道样式不变） */
+  .plan-select { min-height: 44px; }
+  .setting-row input[type=range] { height: 44px; }
+  .realm-param-row input[type=range] { height: 44px; }
+  .cx-row { min-height: 44px; }
+  #codex-search { min-height: 44px; }
+  #realm-intro { min-height: 44px; }
+  #custom-name { min-height: 44px; }
 
   /* ===== 竖屏窄行的防挤压 ===== */
   .logo { font-size: 32px; }

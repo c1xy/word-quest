@@ -1159,7 +1159,7 @@ function monsterTraitOpts() {
 function paintMonsterVisual(o) {
   var cv = $('monster-aura'), emoji = $('monster-emoji');
   if (!cv || !emoji) return;
-  if (!o) { cv.width = 0; return; }
+  if (!o) { cv.width = 0; hideMonsterPos(); return; }
   var F = parseFloat(getComputedStyle(emoji).fontSize) || 64;
   var S = Math.round(F * (o.boss ? 2.5 : 2.1));
   var dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -1217,6 +1217,29 @@ function paintMonsterVisual(o) {
     c.fill();
   }
   c.globalAlpha = 1;
+  /* 词性文字徽标：光环颜色的文字冗余——色弱（尤其红绿/金红难分）与读屏用户
+     不用记「金=名词、红=动词…」的图例也能拿到词性；BOSS 红环非词性信息，不标 */
+  paintMonsterPos(o);
+}
+
+/* 词性徽标：文字 = 冗余信号本体，颜色 = 与光环同色的辅助线索 */
+var POS_TXT = { n: '名词', v: '动词', adj: '形容词', adv: '副词', prep: '虚词', conj: '虚词', pron: '虚词' };
+function paintMonsterPos(o) {
+  var el = $('monster-pos');
+  if (!el) return;
+  var aura = (!o.boss && POS_AURA[o.pos]) || null;
+  if (aura && POS_TXT[o.pos]) {
+    el.textContent = POS_TXT[o.pos];
+    el.style.borderColor = aura.c;
+    el.style.color = aura.c;
+    el.hidden = false;
+  } else {
+    el.hidden = true;
+  }
+}
+function hideMonsterPos() {
+  var el = $('monster-pos');
+  if (el) el.hidden = true;
 }
 
 /* 答完题后亮出词根符文（答题前显示会泄题底，答完展示帮助记忆） */
@@ -1672,6 +1695,11 @@ function renderMatch() {
   match.cards.forEach(function (c, i) {
     var d = document.createElement('div');
     d.className = 'mcard' + (c.open ? ' open' : '') + (c.done ? ' done' : '');
+    /* 键盘可达：卡面是 div 点击翻牌，补焦点语义（Enter/Space 的翻牌路径在 bindMatchDrag）；
+       已配对的卡不可再操作，退出 Tab 序避免空焦点停靠 */
+    d.tabIndex = c.done ? -1 : 0;
+    d.setAttribute('role', 'button');
+    d.setAttribute('aria-label', '第 ' + (i + 1) + ' 张卡，翻牌配对');
     d.innerHTML = '<div class="mcard-inner">' +
       '<div class="mcard-face mcard-back">🎴</div>' +
       '<div class="mcard-face mcard-front' + (c.kind === 'm' ? ' meaning' : '') + '">' + c.text + '</div>' +
@@ -1801,6 +1829,15 @@ function bindMatchDrag() {
   });
   grid.addEventListener('pointerup', function (e) { matchDragFinish(e, false); });
   grid.addEventListener('pointercancel', function (e) { matchDragFinish(e, true); });
+  /* 键盘等效路径：焦点在卡片上时 Enter/Space = 点击翻牌（pointer 系事件不响应键盘） */
+  grid.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var el = e.target.closest ? e.target.closest('.mcard') : null;
+    if (!el) return;
+    e.preventDefault();
+    var i = Array.prototype.indexOf.call(grid.querySelectorAll('.mcard'), el);
+    if (i >= 0) onMatchCard(i);
+  });
 }
 function matchDragFinish(e, cancelled) {
   var st = matchDrag;
@@ -2491,12 +2528,12 @@ function renderRogueDraft() {
   list.forEach(function (id) {
     if (isTalent) {
       var t = rogueTalent(id);
-      html += '<div class="rogue-card" data-rogue-t="' + id + '"><div class="rc-icon">' + t.icon + '</div>' +
+      html += '<div class="rogue-card" data-rogue-t="' + id + '" tabindex="0" role="button" aria-label="选择天赋 ' + t.name + '"><div class="rc-icon">' + t.icon + '</div>' +
         '<div class="rc-name">' + t.name + '</div><div class="rc-desc">' + t.desc + '</div></div>';
     } else {
       var m = BOSS_MODS[id] || { icon: '💀', name: id };
       var rc = ROGUE_CURSES[id] || { desc: '', boonTxt: '' };
-      html += '<div class="rogue-card curse" data-rogue-c="' + id + '"><div class="rc-icon">' + m.icon + '</div>' +
+      html += '<div class="rogue-card curse" data-rogue-c="' + id + '" tabindex="0" role="button" aria-label="接受诅咒 ' + m.name + '"><div class="rc-icon">' + m.icon + '</div>' +
         '<div class="rc-name">' + m.name + '</div><div class="rc-desc">' + rc.desc + '</div>' +
         '<div class="rc-boon">🎁 ' + rc.boonTxt + '</div></div>';
     }
@@ -4384,6 +4421,31 @@ function fx(text, cls, x, y) {
 }
 
 var memCb = null;
+/* ---------- 弹层焦点管理（键盘/读屏可达性） ----------
+   打开弹层把焦点移入内部首个可交互控件（弹层都挂在 DOM 尾部，不移焦的话键盘用户
+   要 Tab 穿过整个背景页才摸得到弹层），关闭时把焦点还给打开前的触发元素。 */
+var overlayFocusReturn = null;
+function overlayFocusIn(overlayId, preferSel) {
+  overlayFocusReturn = document.activeElement;
+  var root = document.getElementById(overlayId);
+  if (!root) return;
+  var t = preferSel ? root.querySelector(preferSel) : null;
+  if (!t || t.hidden || t.disabled || t.tabIndex < 0) {
+    var list = root.querySelectorAll('button, textarea, input, select, [tabindex]');
+    t = null;
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      if (el.hidden || el.disabled || el.tabIndex < 0) continue;
+      t = el; break;
+    }
+  }
+  if (t) { try { t.focus(); } catch (e) {} }
+}
+function overlayFocusBack() {
+  var el = overlayFocusReturn;
+  overlayFocusReturn = null;
+  if (el && document.body.contains(el) && !el.hidden && el.tabIndex >= 0) { try { el.focus(); } catch (e) {} }
+}
 function showMemCard(word, cb) {
   var emoji = (typeof EMOJI_OF !== 'undefined' && EMOJI_OF[word.w]) ? EMOJI_OF[word.w] : '';
   $('mem-emoji').textContent = emoji;
@@ -4412,12 +4474,14 @@ function showMemCard(word, cb) {
   $('mem-speak-btn').disabled = false;
   $('mem-speak-btn').textContent = '🎤 跟读挑战 +5🪙';
   $('memcard').hidden = false;
+  overlayFocusIn('memcard', '#mem-ok');
   memCb = cb;
   TTS.speak(word.w, true);
 }
 function closeMemCard() {
   if ($('memcard').hidden) return;
   $('memcard').hidden = true;
+  overlayFocusBack();
   var cb = memCb; memCb = null;
   if (cb) cb();
 }
@@ -4752,7 +4816,7 @@ function renderCodexList() {
     if (m.lv >= 5) tag = '<span class="cx-tag mastered">已掌握</span>';
     else if (m.seen > 0) tag = '<span class="cx-tag learning">学习中</span>';
     else tag = '<span class="cx-tag new">未学</span>';
-    return '<div class="cx-row" data-w="' + it.w + '"><span class="cx-word">' + it.w + '</span><span class="cx-mean">' + it.m + '</span><span class="cx-stars">' + stars + '</span>' + tag + '</div>';
+    return '<div class="cx-row" data-w="' + it.w + '" tabindex="0" role="button" aria-label="查看单词 ' + it.w + ' 详情"><span class="cx-word">' + it.w + '</span><span class="cx-mean">' + it.m + '</span><span class="cx-stars">' + stars + '</span>' + tag + '</div>';
   });
   var extra = filtered.length > CAP ? '<p class="hint">还有 ' + (filtered.length - CAP) + ' 个词未显示，可用搜索缩小范围</p>' : '';
   listEl.innerHTML = rows.length ? rows.join('') + extra : '<p class="hint">没有符合条件的单词</p>';
@@ -4799,6 +4863,14 @@ function openWordDetail(w) {
   }
   $('wo-stats').innerHTML = stats.map(function (s) { return '<span class="chip">' + s + '</span>'; }).join('');
   $('word-overlay').hidden = false;
+  overlayFocusIn('word-overlay', '#wo-speak');
+}
+
+/* 词详情卡统一关闭口：焦点归还触发元素（此前 4 处各自 hidden=true，键盘焦点
+   永远留在弹层尾部，Tab 会从主页第一个控件重新数起） */
+function closeWordOverlay() {
+  $('word-overlay').hidden = true;
+  overlayFocusBack();
 }
 
 function renderCustomLists() {
@@ -4899,7 +4971,7 @@ function bindSettings() {
   };
   $('btn-export').onclick = function () { openIO('export'); };
   $('btn-import').onclick = function () { openIO('import'); };
-  $('io-cancel').onclick = function () { $('io-overlay').hidden = true; };
+  $('io-cancel').onclick = closeIO;
   $('io-copy').onclick = function () {
     var ta = $('io-text');
     ta.focus(); ta.select();
@@ -4907,7 +4979,7 @@ function bindSettings() {
   };
   $('io-ok').onclick = function () {
     if (ioMode === 'poison') { handlePoisonPaste($('io-text').value); return; }
-    if (ioMode !== 'import') { $('io-overlay').hidden = true; return; }
+    if (ioMode !== 'import') { closeIO(); return; }
     try {
       var data = JSON.parse($('io-text').value);
       if (!data || typeof data !== 'object' || !data.settings || !data.mastery) throw new Error('bad');
@@ -4950,7 +5022,15 @@ function openIO(mode, payload) {
   $('io-overlay').hidden = false;
   if (mode === 'export' || mode === 'poison-export' || mode === 'result-export') {
     setTimeout(function () { ta.focus(); ta.select(); }, 60);
+  } else {
+    overlayFocusIn('io-overlay', '#io-text');   /* 粘贴态也直接落焦文本域（此前焦点留在触发按钮上） */
   }
+}
+
+/* io 弹层统一关闭口（关闭/确定/Esc 三条路径共用）：焦点归还触发元素 */
+function closeIO() {
+  $('io-overlay').hidden = true;
+  overlayFocusBack();
 }
 
 /* ========================= 投毒挑战码（纯本地，零服务器） =========================
@@ -5254,12 +5334,12 @@ function handlePoisonPaste(raw) {
     var rep = decodeResultCode(c);
     if (!rep) { toast('成绩码无效，请检查是否完整复制'); return; }
     receiveResultReport(rep);
-    $('io-overlay').hidden = true;
+    closeIO();
     return;
   }
   var pd = decodePoisonCode(c);
   if (!pd) { toast('挑战码无效，请检查是否完整复制（区分大小写）'); return; }
-  $('io-overlay').hidden = true;
+  closeIO();
   startNightmare(pd);
 }
 function receiveResultReport(rep) {
@@ -5568,12 +5648,13 @@ function duelFinish() {
 
 /* ========================= 键盘操作 ========================= */
 function onKey(e) {
-  /* Esc：接力码/分享卡/存档弹层的桌面逃生通道（生成态内容高，滚动之外多一条路；
-     relayClose 会顺带续跑战斗计时。io 弹层同为高内容文本域弹层，此前漏了 Esc） */
+  /* Esc：接力码/分享卡/存档/词详情弹层的桌面逃生通道（生成态内容高，滚动之外多一条路；
+     relayClose 会顺带续跑战斗计时。io 弹层同为高内容文本域弹层，词详情卡同类，此前漏了） */
   if (e.key === 'Escape') {
     if (!$('relay-overlay').hidden) { e.preventDefault(); relayClose(); return; }
-    if (!$('share-overlay').hidden) { e.preventDefault(); $('share-overlay').hidden = true; return; }
-    if (!$('io-overlay').hidden) { e.preventDefault(); $('io-overlay').hidden = true; return; }
+    if (!$('share-overlay').hidden) { e.preventDefault(); closeShareOverlay(); return; }
+    if (!$('io-overlay').hidden) { e.preventDefault(); closeIO(); return; }
+    if (!$('word-overlay').hidden) { e.preventDefault(); closeWordOverlay(); return; }
   }
   /* 双人热座对决：1-4 选项作答（当前出题方的键盘操作） */
   if ($('scr-duel') && $('scr-duel').classList.contains('active') && duel && duel.phase === 'q' && duel.q && !duel.q.locked) {
@@ -5690,6 +5771,14 @@ function bindEvents() {
     if (tc) { pickRogueTalent(tc.getAttribute('data-rogue-t')); return; }
     var cc = e.target.closest('[data-rogue-c]');
     if (cc) pickRogueCurse(cc.getAttribute('data-rogue-c'));
+  });
+  /* 键盘等效路径：天赋/诅咒卡是 div，补 tabindex/role 后 Enter/Space = 点击锁定 */
+  $('rogue-cards').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var tc = e.target.closest ? e.target.closest('[data-rogue-t]') : null;
+    if (tc) { e.preventDefault(); pickRogueTalent(tc.getAttribute('data-rogue-t')); return; }
+    var cc = e.target.closest ? e.target.closest('[data-rogue-c]') : null;
+    if (cc) { e.preventDefault(); pickRogueCurse(cc.getAttribute('data-rogue-c')); }
   });
   // 双人热座对决
   $('btn-duel').onclick = openDuel;
@@ -5819,7 +5908,13 @@ function bindEvents() {
     var row = e.target.closest('.cx-row');
     if (row && row.dataset.w && !e.target.closest('.fam-chip')) openWordDetail(row.dataset.w);
   });
-  $('wo-close').onclick = function () { $('word-overlay').hidden = true; };
+  /* 键盘等效路径：词行补 tabindex/role 后（renderCodexList），Enter/Space = 点击打开详情 */
+  $('codex-list').addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var row = e.target.closest ? e.target.closest('.cx-row') : null;
+    if (row && row.dataset.w) { e.preventDefault(); openWordDetail(row.dataset.w); }
+  });
+  $('wo-close').onclick = closeWordOverlay;
   $('wo-speak').onclick = function () { if (woWord) TTS.speak(woWord, true); };
   $('wo-family').addEventListener('click', function (e) {
     var chip = e.target.closest('.fam-chip');
@@ -5831,7 +5926,7 @@ function bindEvents() {
     m.lv = 5;
     m.due = Date.now() + IV_MIN[5] * 60000;
     persist();
-    $('word-overlay').hidden = true;
+    closeWordOverlay();
     toast('⭐ 已标记「' + woWord + '」为已掌握');
     renderCodexStats(); drawStats(); renderCodexList();
   };
@@ -5839,15 +5934,20 @@ function bindEvents() {
     if (!woWord) return;
     delete save.mastery[woWord];
     persist();
-    $('word-overlay').hidden = true;
+    closeWordOverlay();
     toast('♻️ 已重置「' + woWord + '」的学习记录');
     renderCodexStats(); drawStats(); renderCodexList();
   };
   $('codex-search').oninput = function () { codexQuery = this.value.trim(); renderCodexList(); };
   document.querySelectorAll('#codex-filters .filter').forEach(function (b) {
+    b.setAttribute('aria-pressed', b.classList.contains('active') ? 'true' : 'false');   /* 激活态此前只靠底色，读屏拿不到 */
     b.onclick = function () {
-      document.querySelectorAll('#codex-filters .filter').forEach(function (x) { x.classList.remove('active'); });
+      document.querySelectorAll('#codex-filters .filter').forEach(function (x) {
+        x.classList.remove('active');
+        x.setAttribute('aria-pressed', 'false');
+      });
       b.classList.add('active');
+      b.setAttribute('aria-pressed', 'true');
       codexFilter = b.dataset.f;
       renderCodexList();
     };
@@ -6689,6 +6789,7 @@ function relayResumeBattleTimer() {
 }
 function relayClose() {
   $('relay-overlay').hidden = true;
+  overlayFocusBack();
   relayResumeBattleTimer();
 }
 
@@ -6738,6 +6839,7 @@ function openRelay() {
   $('relay-run-opt').hidden = !(run && !run.ended && (run.mode === 'adventure' || run.mode === 'endless') && !run.poison);
   $('relay-include-run').checked = true;
   $('relay-overlay').hidden = false;
+  overlayFocusIn('relay-overlay', '#btn-relay-gen');
   relayPauseBattleTimer();   /* 战斗页 📲 入口：打开即暂停计时，关闭/取消时续跑 */
 }
 function relayPartsNote() {
@@ -6815,6 +6917,7 @@ function relayRestorePaste() {
    备好却没人看见」的死胡同——单片码同一条路径同样命中。 */
 function relayShowConfirm(obj) {
   $('relay-overlay').hidden = false;
+  overlayFocusIn('relay-overlay', '#btn-relay-apply');   /* 扫码集齐弹确认框：焦点直达「确认恢复」 */
   var cleaned = sanitizeSave(obj.save);
   relayUi.incoming = { save: cleaned, run: relaySanitizeSnapshot(obj.run), t: obj.t };
   $('relay-gen').hidden = true;
@@ -7171,7 +7274,7 @@ function renderRealmMods() {
     var m = BOSS_MODS[id];
     var on = realmDraft.mods.indexOf(id) >= 0;
     html += '<button class="btn btn-tiny realm-mod-chip' + (on ? ' on' : '') + '" data-mod="' + id +
-      '" title="' + realmEsc(m.desc) + '">' + m.icon + ' ' + m.name + '</button>';
+      '" aria-pressed="' + (on ? 'true' : 'false') + '" title="' + realmEsc(m.desc) + '">' + m.icon + ' ' + m.name + '</button>';
   });
   wrap.innerHTML = html;
   $('realm-mod-note').textContent = '已选 ' + realmDraft.mods.length + '/2 条词缀';
@@ -7191,7 +7294,7 @@ function renderRealmList() {
       '<div class="realm-saved-acts">' +
       '<button class="btn btn-tiny btn-primary" data-realm-play="' + e.id + '">▶ 重玩</button>' +
       '<button class="btn btn-tiny" data-realm-share="' + e.id + '">📤 分享</button>' +
-      '<button class="btn btn-tiny danger" data-realm-del="' + e.id + '">🗑️</button>' +
+      '<button class="btn btn-tiny danger" data-realm-del="' + e.id + '" aria-label="删除词境 #' + (list.length - i) + '">🗑️</button>' +
       '</div></div>';
   });
   wrap.innerHTML = html;
@@ -7674,10 +7777,15 @@ var ShareCard = {
       toast('PNG 已开始下载');
     };
     $('share-overlay').hidden = false;
+    overlayFocusIn('share-overlay', '#btn-share-download');
   }
 };
+function closeShareOverlay() {
+  $('share-overlay').hidden = true;
+  overlayFocusBack();
+}
 function bindShareOverlay() {
-  $('btn-share-close').onclick = function () { $('share-overlay').hidden = true; };
+  $('btn-share-close').onclick = closeShareOverlay;
 }
 /* 结算页入口：按本局类型构造分享卡数据 */
 function openShareCardForResult() {
