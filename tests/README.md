@@ -5,23 +5,27 @@
 
 | 文件 | 形态 | 耗时 | 覆盖 |
 | --- | --- | --- | --- |
-| `unit.test.js` | node 直跑，无浏览器 | 秒级 | 存档 sanitize 坏档自愈、成就解锁条件、SRS 排程边界、挑战码/成绩码/接力码/词境码编解码往返与坏码拒绝、词境参数边界、DEFLATE/base64url 管线 |
+| `unit.test.js` | node 直跑，无浏览器 | 秒级 | 存档 sanitize 坏档自愈、**存档迁移矩阵**（v1 时代无 xp/talents/poisonLog 档 / 中间时代缺部分字段档 / 损坏 JSON / 字段类型错误脏档 / 现代全字段档往返——逐一走真实 `loadSave` 通道断言字段补全·成就不误触·进度保留）、成就解锁条件、SRS 排程边界、挑战码/成绩码/接力码/词境码编解码往返与坏码拒绝、词境参数边界、DEFLATE/base64url 管线 |
 | `e2e.test.js` | playwright headless | 约 5-8 分钟 | 四组信息架构 12 入口、首访引导四态、投毒全链路（造毒→贴码→毒池→成绩码→回贴）、接力码全链路（战斗中导出→hash 恢复→run 级续接）、词境全链路（造境→生成码→贴码→开战→SRS 写回）、听写挑战、七种结算结构断言、S8 弹层按钮组/Esc 逃生/图鉴返回刷新一致性回归、S9 键盘可达性（Tab 序列含四组入口/Enter 激活/图鉴词行·配对卡·肉鸽卡可聚焦/弹层焦点管理与 Esc）、S10 色弱冗余标记（词性文字徽标/选项 ✓✕ 字形/对错色 protan-deutan 投影距离阈值）、S11 触屏目标 ≥44px（四组 IA 每按钮 + 主页/设置/图鉴/战斗/结算/词境实测 rect，checkbox 取 label 命中区）、S-PERF 性能预算（主页加载 ≤3s / 首次可交互 ≤5s / JS heap 采样打印 `PERF-BASELINE` 行作后续轮次对比基线） |
-| `run-all.js` | 一键运行器 | — | 切到仓库根 → 先 unit 后 e2e → 汇总判定，任何失败退出码非零 |
+| `monkey.test.js` | playwright headless | 约 2 分钟 | WQ 版 monkey：随机挑可见可点元素真实点击（含偶尔双击）+ 随机键盘注入（Tab/Enter/Esc/方向键/数字/字母，聚焦输入框乱打字），漫游主页四组入口→战斗→配对→图鉴等界面。硬门槛：**全程零 pageerror** + 动作量达标（按时长折算 ≥0.85 动作/秒，防假跑）+ 到过 ≥2 个界面（防原地打转）+ 结尾页面仍可交互；`console.error` 只打印不判失败（headless 语音/自动播放降级属正常日志）。时长可用 `WQ_MONKEY_MS` 环境变量覆盖（如 `WQ_MONKEY_MS=30000`） |
+| `run-all.js` | 一键运行器 | — | 切到仓库根 → 按参数运行对应套件（默认 `all` = unit + e2e；`monkey` 需显式传参）→ 汇总判定，任何失败退出码非零 |
 
 ## 运行方法
 
 ```bash
-# 全套（unit + e2e）
+# 全套回归（unit + e2e）
 node tests/run-all.js
 
 # 只跑其中一个
 node tests/run-all.js unit
 node tests/run-all.js e2e
+node tests/run-all.js monkey     # 2 分钟随机漫游压测，发版前手动跑一次
 
 # 单文件直跑
 node tests/unit.test.js
 node tests/e2e.test.js
+node tests/monkey.test.js
+WQ_MONKEY_MS=30000 node tests/monkey.test.js   # 快速冒烟 30 秒版
 ```
 
 全部通过时退出码为 0；任何 FAIL（或子进程异常退出）退出码为 1。
@@ -30,8 +34,8 @@ node tests/e2e.test.js
 ## 依赖
 
 - **node ≥ 16**（无其他 npm 依赖；unit 不装任何包即可跑）。
-- **e2e 需要 playwright**：按顺序探测 `playwright` → `playwright-core` → 全局
-  `@playwright/cli` 自带的 playwright-core。都找不到时 **e2e 整组 SKIP**（退出码仍为 0，
+- **e2e / monkey 需要 playwright**：按顺序探测 `playwright` → `playwright-core` → 全局
+  `@playwright/cli` 自带的 playwright-core。都找不到时 **e2e / monkey 整组 SKIP**（退出码仍为 0，
   输出 SKIP 原因；unit 结果照常判定）。安装任一即可：
   ```bash
   npm i -D playwright        # 或 playwright-core（体积更小）

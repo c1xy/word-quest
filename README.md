@@ -10,7 +10,7 @@
 
 **📱 安装到手机/桌面（PWA 离线可玩）**：用本地服务打开（在 word-quest 目录运行 `python -m http.server 8931` 或 `npx serve`，手机访问 `http://电脑IP:8931`），然后浏览器菜单选「安装应用 / 添加到主屏幕」。之后无需联网也能玩，更新文件后自动生效。
 
-> 进度自动保存在浏览器 localStorage 里，关掉页面也不会丢。换电脑可用设置页的「导出/导入存档」。
+> 进度自动保存在浏览器 localStorage 里，关掉页面也不会丢。换电脑可用设置页的「导出/导入存档」。旧版本存档升级后自动补全新增字段（金币/成就/学习记录原样保留），导入或落盘的损坏/错形存档在加载时逐字段清洗自愈——坏档降级修复对应字段，不会白屏或丢掉完好的进度。
 
 ## 🎮 游戏模式
 
@@ -118,6 +118,21 @@ dictionary n. 词典
 - 答对/答错除红绿配色外，选项自带 **✓ / ✕ 字形**冗余标记（protanopia/deuteranopia 模拟下色距不足处不依赖色觉也能读）
 - 怪物光环的颜色/形状表示词性（金=名词、红=动词、紫=形容词、青=副词），怪物名旁同步显示**词性文字徽标**，不用背图例
 
+## 🧪 自动化测试（tests/ 目录，随仓库提交）
+
+```bash
+# 全套回归（unit + e2e，收发版前跑这个）
+node tests/run-all.js
+
+# 分套直跑
+node tests/run-all.js unit      # node 直跑，秒级：存档 sanitize/迁移矩阵、成就、SRS、四种码编解码、DEFLATE
+node tests/run-all.js e2e       # playwright headless，约 5-8 分钟：入口可达/引导/投毒·接力·词境全链路/结算结构/键盘可达/触屏目标/性能预算
+node tests/run-all.js monkey    # 2 分钟随机漫游压测：真实点击 + 键盘注入，硬门槛零 pageerror（不并入默认 all，发版前手动跑一次）
+```
+
+- unit 无任何依赖（node ≥16 即可）；e2e / monkey 需要 playwright 或 playwright-core 与本机 Chrome/Edge（找不到时整组 SKIP 并说明原因，详见 `tests/README.md`）。
+- 全部通过退出码 0，任何 FAIL 退出码 1；输出逐条 `PASS/FAIL` 并带汇总行。
+
 ## 📁 文件结构
 
 ```
@@ -125,7 +140,10 @@ word-quest/
 ├── index.html   # 页面结构
 ├── style.css    # 样式与动画
 ├── words.js     # 词库数据（可自行增删词）
-└── game.js      # 游戏逻辑（战斗 / 间隔重复 / 商店 / 存档）
+├── game.js      # 游戏逻辑（战斗 / 间隔重复 / 商店 / 存档）
+├── sw.js        # Service Worker（离线缓存，发版需递增 CACHE 版本号）
+├── libs/        # 第三方库（二维码）
+└── tests/       # 自动化测试（unit / e2e / monkey + 一键运行器，见「自动化测试」）
 ```
 
 ## ❓ 常见问题

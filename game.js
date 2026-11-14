@@ -1691,6 +1691,13 @@ function startMatch() {
 }
 function renderMatch() {
   var grid = $('match-grid');
+  /* 整列重建会替换全部卡面 DOM：先记住焦点卡的位置，重建后还回去——否则键盘用户
+     每翻一张卡（Enter 或点击）焦点都掉回 BODY，要从第 1 张卡重新 Tab（遗留池 r13） */
+  var prevIdx = -1;
+  var prev = document.activeElement;
+  if (prev && prev.classList && prev.classList.contains('mcard') && grid.contains(prev)) {
+    prevIdx = Array.prototype.indexOf.call(grid.children, prev);
+  }
   grid.innerHTML = '';
   match.cards.forEach(function (c, i) {
     var d = document.createElement('div');
@@ -1706,6 +1713,15 @@ function renderMatch() {
       '</div>';
     grid.appendChild(d);
   });
+  /* 焦点还原：原卡还在 Tab 序（未配对）就回原位；原卡已配对则顺移到下一张可用卡。
+     仅在配对屏处于激活态时执行，避免换屏/重开时抢走别处的焦点 */
+  if (prevIdx >= 0 && $('scr-match').classList.contains('active')) {
+    var nodes = grid.querySelectorAll('.mcard');
+    for (var k = 0; k < nodes.length; k++) {
+      var cand = nodes[(prevIdx + k) % nodes.length];
+      if (cand.tabIndex >= 0) { try { cand.focus(); } catch (e) {} break; }
+    }
+  }
   $('match-moves').textContent = '👟 步数 ' + match.moves;
   $('match-pairs').textContent = '🧩 ' + match.matched + '/' + match.total + ' 对';
 }
@@ -5021,6 +5037,9 @@ function openIO(mode, payload) {
   else logEl.hidden = true;
   $('io-overlay').hidden = false;
   if (mode === 'export' || mode === 'poison-export' || mode === 'result-export') {
+    /* 只读三态也走 overlayFocusIn 记下触发元素（此前只 setTimeout 落焦文本域，
+       overlayFocusReturn 是空，关闭后焦点掉回 BODY，Tab 要从主页第一个控件重新数起） */
+    overlayFocusIn('io-overlay', '#io-text');
     setTimeout(function () { ta.focus(); ta.select(); }, 60);
   } else {
     overlayFocusIn('io-overlay', '#io-text');   /* 粘贴态也直接落焦文本域（此前焦点留在触发按钮上） */

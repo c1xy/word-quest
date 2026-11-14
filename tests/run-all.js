@@ -1,9 +1,11 @@
 /* Word Quest · 一键测试运行器
-   用法：node tests/run-all.js [unit|e2e|all]   （默认 all）
+   用法：node tests/run-all.js [unit|e2e|monkey|all]   （默认 all）
    行为：先把工作目录切到仓库根（子进程与静态服务器都以仓库根为基准），
    依次运行 unit（node 直跑，秒级）与 e2e（playwright headless，约 5-8 分钟），
    汇总输出「PASS x / FAIL y / SKIP z」；任何 FAIL 或子进程异常退出 → 进程退出码非零。
-   e2e 缺 playwright/浏览器时整组 SKIP（退出码不计失败，原因见 tests/README.md）。 */
+   e2e 缺 playwright/浏览器时整组 SKIP（退出码不计失败，原因见 tests/README.md）。
+   monkey 是 2 分钟随机漫游压测（真实点击+键盘注入，零 pageerror 门槛），只随显式
+   `monkey` 参数运行，不并入默认 all（回归保持 unit+e2e 的节奏，发版前手动跑一次）。 */
 'use strict';
 const { spawn } = require('child_process');
 const path = require('path');
@@ -12,15 +14,16 @@ const path = require('path');
 process.chdir(path.join(__dirname, '..'));
 
 const which = (process.argv[2] || 'all').toLowerCase();
-const only = ['unit', 'e2e', 'all'];
+const only = ['unit', 'e2e', 'monkey', 'all'];
 if (only.indexOf(which) < 0) {
-  console.error('用法: node tests/run-all.js [unit|e2e|all]');
+  console.error('用法: node tests/run-all.js [unit|e2e|monkey|all]');
   process.exit(2);
 }
 
 const steps = [];
 if (which === 'unit' || which === 'all') steps.push({ name: 'unit', cmd: 'node', args: ['tests/unit.test.js'] });
 if (which === 'e2e' || which === 'all') steps.push({ name: 'e2e', cmd: 'node', args: ['tests/e2e.test.js'] });
+if (which === 'monkey') steps.push({ name: 'monkey', cmd: 'node', args: ['tests/monkey.test.js'] });
 
 function runStep(step) {
   return new Promise(resolve => {
