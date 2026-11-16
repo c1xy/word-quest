@@ -20,6 +20,9 @@
          渐入错峰、@keyframes 属性白名单（transform/opacity/filter/box-shadow）扫描、
          连击换挡/答错抖动/正确词延迟强调/失血三档警示类名状态机、结算数字滚动落位、
          横幅点按跳过、切屏回顶）
+     S15 连局压测（r16：同一页面不重载连打 10 局完整对局——主线/远征/肉鸽/听写/热座各
+         2 局混排，每局结算/收官后回主页；断言全程零 pageerror + 每局回主页 + JS heap
+         增长 ≤8MB（每局 CDP 强制 GC 后采样 performance.memory，S15-HEAP 行入基线））
      S-PERF 性能预算（本地服务：主页加载 ≤3s、首次可交互 ≤5s、JS heap 采样入 PERF-BASELINE 行）
    依赖：playwright 或 playwright-core（找不到时整组 SKIP，退出码 0 并说明原因），
    浏览器可执行文件依次探测 playwright 自带 chromium → 环境变量 WQ_CHROME_PATH →
@@ -1383,8 +1386,12 @@ if (!resolvable) {
         // ⑤ 收官：焦点到「再来一局」，tap 续局开出新盘
         const finDesc = await aeDesc();
         ok('S13-⑤ 收官焦点在「再来一局」（' + finDesc + '）', await page.evaluate(() => document.activeElement === document.getElementById('btn-match-restart')), finDesc);
+        const timeBeforeRestart = await page.evaluate(() => document.getElementById('match-time').textContent.trim());
         await page.tap('#btn-match-restart');
         await sleep(450);
+        const timeAfterRestart = await page.evaluate(() => document.getElementById('match-time').textContent.trim());
+        ok('S13-⑤ 续局计时立即归零（' + timeBeforeRestart + ' → ' + timeAfterRestart + '，r15 遗留清零回归）',
+          /0\s*秒/.test(timeAfterRestart), timeAfterRestart);
         ps = await pairsState();
         ok('S13-⑤ 续局新盘（' + ps + '）', ps.indexOf('0/8') >= 0, ps);
         ok('S13-⑤ 续局后焦点不落 BODY（' + (await aeDesc()) + '）', (await aeDesc()) !== 'BODY', await aeDesc());
@@ -1604,6 +1611,196 @@ if (!resolvable) {
         ok('S14-H 返回主页回顶（scrollY=' + backY + '，r15 瑕疵修复回归）', backY === 0, 'backY=' + backY);
         ok('S14 无页面异常（pageerror=0）', errors14.length === 0, errors14.join(' | '));
         await c14.context.close();
+      }
+
+      /* ============ S15 · 连局压测：同一页面连打 10 局完整对局（r16 新增维度） ============
+         主线/远征/肉鸽/听写/热座 各 2 局混排（顺序 1-5 再来一轮），全程不 reload——
+         这正是泄漏/异常积累的温床。每局完整走到结算屏（热座为收官面板）并点「返回主页」。
+         断言：A 每局结算判定逐局核对 + 返回主页成功；B 全程零 pageerror（逐局）；
+         C JS heap 增长 ≤8MB——每局回主页后 CDP 强制 GC（HeapProfiler.collectGarbage，
+         与 NV 压测同款手法）再采样 performance.memory，增长量 = 第 10 局采样 − 第 1 局采样
+         （同主页状态对比，日常 GC 抖动不进差值）；performance.memory 不可得时按 SKIP。 */
+      console.log('---- S15 连局压测（10 局混排） ----');
+      {
+        const c15 = await newContext(browser);
+        const page = c15.page;
+        const errors15 = [];
+        page.on('pageerror', e => errors15.push(e.message));
+        await page.goto(BASE_URL + '/', { waitUntil: 'load' });
+        await page.waitForSelector('#scr-home.active', { timeout: 15000 });
+        /* CDP 强制 GC 会话：建一次全程复用；会话断开等异常只影响当次采样精度 */
+        const cdp15 = await page.context().newCDPSession(page);
+        const heapMB = async () => {
+          try { await cdp15.send('HeapProfiler.collectGarbage'); } catch (e) {}
+          return page.evaluate(() => performance.memory
+            ? Math.round(performance.memory.usedJSHeapSize / 1048576 * 10) / 10 : null);
+        };
+        const heapStart = await heapMB();   // 开局前采样（诊断用，不进增长差值）
+        /* 结算收口：结算屏标题核对 → 返回主页按钮 → scr-home 激活 */
+        const settleAndHome = async (label, wantTitle) => {
+          await waitResult(page, 15000);
+          const r = await page.evaluate(() => ({
+            active: document.getElementById('scr-result').classList.contains('active'),
+            title: document.getElementById('result-title').textContent,
+            homeBtn: !!document.getElementById('btn-result-home')
+          }));
+          ok('S15 ' + label + ' · 结算屏激活且标题=' + wantTitle, r.active && r.title === wantTitle, JSON.stringify(r));
+          ok('S15 ' + label + ' · 返回主页按钮在位', r.homeBtn);
+          await page.click('#btn-result-home');
+          await page.waitForSelector('#scr-home.active', { timeout: 8000 });
+          ok('S15 ' + label + ' · 已回主页', true);
+        };
+        /* 热座收官收口：duel-done 面板 + 判定文案 + 战绩入档（plays +1）→ ← 返回 → scr-home */
+        const duelDoneAndHome = async (label, playsBefore) => {
+          const r = await page.evaluate(p0 => ({
+            done: !document.getElementById('duel-done').hidden,
+            verdict: (document.querySelector('#duel-result .duel-verdict') || {}).textContent || '',
+            chips: document.querySelectorAll('#duel-result .chip').length,
+            plays: (JSON.parse(localStorage.getItem('wq_save_v1')).duel || {}).plays || 0,
+            p0: p0
+          }), playsBefore);
+          ok('S15 ' + label + ' · 对决收官面板（判定=' + r.verdict + ' · 双队 chips=' + r.chips + '）',
+            r.done && r.chips >= 2 && (r.verdict.indexOf('获胜') >= 0 || r.verdict.indexOf('平分秋色') >= 0), JSON.stringify(r));
+          ok('S15 ' + label + ' · 对局战绩入档（plays ' + r.p0 + ' → ' + r.plays + '）', r.plays === r.p0 + 1, JSON.stringify(r));
+          await page.click('#btn-duel-back');
+          await page.waitForSelector('#scr-home.active', { timeout: 8000 });
+          ok('S15 ' + label + ' · 已回主页', true);
+        };
+        /* 热座一整局：进对决屏 → 12 问轮流交接（ready → 点正确项 → 揭晓 1.5s）→ 收官面板；
+           首次交接/首次出题各锚定一次焦点断言（r15 遗留清零回归：handoff 焦点交
+           #btn-duel-ready、出题后交 #scr-duel 屏容器）。返回 turn 数供诊断 */
+        const duelPlayFull = async (label) => {
+          await page.click('#btn-duel');
+          await page.waitForSelector('#scr-duel.active', { timeout: 5000 });
+          await page.click('#btn-duel-start');
+          const focusChecked = { handoff: false, q: false };
+          for (let guard = 0; guard < 80; guard++) {
+            const st = await page.evaluate(() => {
+              const d = (typeof duel === 'undefined') ? null : duel;
+              return {
+                phase: d ? d.phase : null, turn: d ? d.turn : 0,
+                donePanel: !document.getElementById('duel-done').hidden,
+                answer: d && d.q ? d.q.answer : null,
+                locked: d && d.q ? !!d.q.locked : true
+              };
+            });
+            if (st.donePanel) return st.turn;
+            if (!st.phase) return -1;
+            if (st.phase === 'handoff') {
+              if (!focusChecked.handoff) {
+                focusChecked.handoff = true;
+                const ae = await page.evaluate(() => (document.activeElement || {}).id || '');
+                ok('S15 ' + label + ' · 交接横幅焦点锚定 #btn-duel-ready（r15 遗留清零回归）', ae === 'btn-duel-ready', 'activeElement=' + ae);
+              }
+              await page.click('#btn-duel-ready'); await sleep(220); continue;
+            }
+            if (st.phase === 'q' && !st.locked && st.answer !== null) {
+              if (!focusChecked.q) {
+                focusChecked.q = true;
+                const ae = await page.evaluate(() => (document.activeElement || {}).id || '');
+                ok('S15 ' + label + ' · 出题后焦点锚定 #scr-duel 容器（r15 遗留清零对称回归）', ae === 'scr-duel', 'activeElement=' + ae);
+              }
+              await page.click('#duel-opts .q-opt >> nth=' + st.answer).catch(() => {});
+              await sleep(1750);   /* 揭晓停留 1.5s（答对路径）后进下一题交接 */
+              continue;
+            }
+            await sleep(280);
+          }
+          return -2;
+        };
+        /* 肉鸽开局共用：天赋避开 ranger（全场强制拼写题，选择题循环答不了）→ 诅咒签 → 开战 */
+        const rogueStart = async () => {
+          await page.click('#btn-rogue');
+          await page.waitForSelector('#scr-rogue.active', { timeout: 5000 });
+          await page.click('#btn-rogue-start');
+          await page.waitForSelector('[data-rogue-t]', { timeout: 5000 });
+          const tIds = await page.evaluate(() => Array.from(document.querySelectorAll('[data-rogue-t]')).map(el => el.getAttribute('data-rogue-t')));
+          await page.click('[data-rogue-t="' + (tIds.find(id => id !== 'ranger') || tIds[0]) + '"]');
+          await page.waitForSelector('[data-rogue-c]', { timeout: 5000 });
+          await page.click('[data-rogue-c]');
+          await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        };
+        /* 每局结束后统一收口：heap 采样 + 逐局零 pageerror */
+        const afterGame = async (n) => {
+          heaps15.push(await heapMB());
+          ok('S15 第' + n + '局 · 零 pageerror（累计 ' + errors15.length + '）', errors15.length === 0, errors15.join(' | '));
+        };
+        const heaps15 = [];
+
+        /* ---------- 第 1-5 局 ---------- */
+        await startBattleFromSetup(page, 'adventure');
+        await battleChoice(page, 2);
+        await quitBattle(page);
+        await settleAndHome('第1局·主线冒险', '🏳️ 撤退整顿');
+        await afterGame(1);
+
+        await startBattleFromSetup(page, 'expedition', null);
+        await battleChoice(page, 1);
+        await quitBattle(page);
+        await settleAndHome('第2局·每日远征', '🏳️ 远征撤退');
+        await afterGame(2);
+
+        await rogueStart();
+        await battleChoice(page, 1);
+        await quitBattle(page);
+        await settleAndHome('第3局·词魂肉鸽', '🏳️ 词魂撤退');
+        await afterGame(3);
+
+        await startBattleFromSetup(page, 'dictation', 10);
+        const d15a = await battleSpell(page, 10);   // 全 10 词拼完 = 自然终局
+        ok('S15 第4局·听写 · 10 词拼完（' + d15a + '）', d15a === 'ok' || d15a === 'ended', d15a);
+        await settleAndHome('第4局·听写挑战', '🎧 听写挑战完成！');
+        await afterGame(4);
+
+        let duelPlays = await page.evaluate(() => (JSON.parse(localStorage.getItem('wq_save_v1')).duel || {}).plays || 0);
+        const duelTurns1 = await duelPlayFull('第5局·热座');
+        ok('S15 第5局·热座 · 12 问打满（turn=' + duelTurns1 + '）', duelTurns1 === 12, 'turn=' + duelTurns1);
+        await duelDoneAndHome('第5局·热座对决', duelPlays);
+        await afterGame(5);
+
+        /* ---------- 第 6-10 局 ---------- */
+        await startBattleFromSetup(page, 'adventure');
+        await battleChoice(page, 1);
+        await quitBattle(page);
+        await settleAndHome('第6局·主线冒险', '🏳️ 撤退整顿');
+        await afterGame(6);
+
+        await startBattleFromSetup(page, 'expedition', null);
+        await battleChoice(page, 1);
+        await quitBattle(page);
+        await settleAndHome('第7局·每日远征', '🏳️ 远征撤退');
+        await afterGame(7);
+
+        await rogueStart();
+        await battleChoice(page, 1);
+        await quitBattle(page);
+        await settleAndHome('第8局·词魂肉鸽', '🏳️ 词魂撤退');
+        await afterGame(8);
+
+        await startBattleFromSetup(page, 'dictation', 10);
+        await battleSpell(page, 3);
+        await quitBattle(page);
+        await settleAndHome('第9局·听写挑战', '🏳️ 听写中途退出');
+        await afterGame(9);
+
+        duelPlays = await page.evaluate(() => (JSON.parse(localStorage.getItem('wq_save_v1')).duel || {}).plays || 0);
+        const duelTurns2 = await duelPlayFull('第10局·热座');
+        ok('S15 第10局·热座 · 12 问打满（turn=' + duelTurns2 + '）', duelTurns2 === 12, 'turn=' + duelTurns2);
+        await duelDoneAndHome('第10局·热座对决', duelPlays);
+        await afterGame(10);
+
+        /* ---------- 压测总判定：零 pageerror + heap 增长 ≤8MB ---------- */
+        ok('S15 全程零 pageerror（10 局累计 ' + errors15.length + '）', errors15.length === 0, errors15.slice(0, 6).join(' | '));
+        if (heaps15.length === 10 && heaps15.every(h => h !== null)) {
+          const growth = Math.round((heaps15[9] - heaps15[0]) * 10) / 10;
+          ok('S15 JS heap 增长 ≤8MB（第1局后 ' + heaps15[0] + 'MB → 第10局后 ' + heaps15[9] + 'MB，增长 ' + growth + 'MB，开局前 ' + heapStart + 'MB）',
+            growth <= 8, 'growth=' + growth);
+          /* 基线行（供后续轮次对比，勿删除） */
+          console.log('S15-HEAP ' + JSON.stringify({ heapStartMB: heapStart, samplesMB: heaps15, growthMB: growth }));
+        } else {
+          skip('S15 JS heap 增长 ≤8MB', 'performance.memory 不可得（samples=' + JSON.stringify(heaps15) + '）');
+        }
+        await c15.context.close();
       }
 
       /* ============ S-PERF · 性能预算基线（本地服务 · 每轮对比） ============ */
