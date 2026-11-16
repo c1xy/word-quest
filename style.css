@@ -29,6 +29,15 @@
   --sp-2: 10px;
   --sp-3: 14px;
   --sp-4: 20px;
+
+  /* ===== 动效常量（r15 手感轮收敛）：转场曲线/时长全站统一 =====
+     --t-ease 微回弹出场曲线（快出缓收，结尾 8% 回弹不夸张）；
+     --t-dur 出场时长（屏幕切换 / 弹层 / 卡片 / toast 同一档）。
+     约束：入场类动效只动 transform/opacity（合成层），常驻循环动画只允许
+     transform/opacity/filter（+box-shadow 一档，paint 不触发 layout）——
+     e2e 的动效预算用例会扫 styleSheets 强制执行这条线。 */
+  --t-ease: cubic-bezier(.22, 1.28, .36, 1);
+  --t-dur: .32s;
 }
 
 html, body { height: 100%; }
@@ -46,13 +55,15 @@ body {
 
 #app { max-width: 640px; margin: 0 auto; min-height: 100vh; min-height: 100dvh; position: relative; }
 
-/* ---------- 屏幕切换 ---------- */
+/* ---------- 屏幕切换 ----------
+   统一转场（r15）：所有屏（四组 IA 进入/返回、战斗/商店/结算）共用
+   screenIn + var(--t-dur)/var(--t-ease)；display:none→flex 每次激活重放一次 */
 .screen {
   display: none;
   min-height: 100vh;
   min-height: 100dvh;
   padding: 16px;
-  animation: screenIn .35s ease;
+  animation: screenIn var(--t-dur) var(--t-ease);
 }
 .screen.active { display: flex; flex-direction: column; }
 /* 屏容器是 showScreen 的程序化焦点锚点（tabindex=-1，见 game.js）：整屏描边是噪音 */
@@ -145,12 +156,29 @@ body {
 /* ---------- 主菜单 ---------- */
 #scr-home { justify-content: center; align-items: center; position: relative; z-index: 1; }
 .home-inner { width: 100%; max-width: 420px; text-align: center; }
+
+/* 首屏渐入（r15）：主页各块错峰上浮淡入——首帧不再是「一整块从底部平移进来」，
+   logo 立即可见（delay 0），后续块 45ms 步进、总错峰 ≤315ms，避免大块空白；
+   返回主页同样重放（display:none→flex 重触发 animation），节奏一致 */
+.home-inner > * { animation: homeIn var(--t-dur) var(--t-ease) both; }
+.home-inner > *:nth-child(2) { animation-delay: 45ms; }
+.home-inner > *:nth-child(3) { animation-delay: 90ms; }
+.home-inner > *:nth-child(4) { animation-delay: 135ms; }
+.home-inner > *:nth-child(5) { animation-delay: 180ms; }
+.home-inner > *:nth-child(6) { animation-delay: 225ms; }
+.home-inner > *:nth-child(7) { animation-delay: 270ms; }
+.home-inner > *:nth-child(n+8) { animation-delay: 315ms; }
+@keyframes homeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
 .logo {
   font-size: 40px; letter-spacing: 2px;
   background: linear-gradient(180deg, #ffe9a8, var(--c-accent));
   -webkit-background-clip: text; background-clip: text; color: transparent;
   filter: drop-shadow(0 3px 0 rgba(0,0,0,.4));
-  animation: logoBob 3s ease-in-out infinite;
+  /* 渐入 + 常驻浮动并存：homeIn 管 opacity（transform 让位给 logoBob，避免两动画抢同一属性） */
+  animation: homeIn var(--t-dur) var(--t-ease) both, logoBob 3s ease-in-out infinite;
 }
 @keyframes logoBob { 0%,100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(-6px) rotate(1deg); } }
 .slogan { color: var(--c-sub); margin: 6px 0 18px; font-size: 15px; }
@@ -223,6 +251,15 @@ body {
 .top-info.combo { color: var(--c-accent); font-weight: 800; border-color: rgba(255,209,102,.5); display: none; }
 .top-info.combo.show { display: inline-block; animation: comboPop .3s ease; }
 @keyframes comboPop { 0% { transform: scale(1.6); } 100% { transform: scale(1); } }
+/* 连击换挡重锤（r15 手感）：连击跨过 3/6/10 档位那一拍，徽章加一记更大的
+   脉冲 + 火光（game.js updateHUD 在档位抬升时挂 .tier-up，500ms 后摘除）。
+   transform+filter，合成层动效 */
+.top-info.combo.tier-up { animation: comboPop .3s ease, comboTierPulse .5s var(--t-ease); }
+@keyframes comboTierPulse {
+  0% { transform: scale(2); box-shadow: 0 0 0 0 rgba(255,160,60,.55); }
+  40% { transform: scale(1.18); box-shadow: 0 0 0 10px rgba(255,160,60,0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255,160,60,0); }
+}
 #btn-quit { margin-right: auto; }
 
 .timer-wrap {
@@ -322,10 +359,10 @@ body {
 }
 .q-card.shake { animation: cardShake .4s ease; }
 @keyframes cardShake {
-  0%,100% { transform: translateX(0); }
-  20% { transform: translateX(-12px); }
-  45% { transform: translateX(10px); }
-  70% { transform: translateX(-6px); }
+  0%,100% { transform: translateX(0) rotate(0deg); }
+  20% { transform: translateX(-12px) rotate(-1.1deg); }
+  45% { transform: translateX(10px) rotate(.9deg); }
+  70% { transform: translateX(-6px) rotate(-.5deg); }
 }
 .q-type { text-align: center; font-size: 13px; color: var(--c-accent); font-weight: 700; letter-spacing: 1px; }
 .q-prompt {
@@ -357,6 +394,13 @@ body {
 .q-opt.wrong {
   background: linear-gradient(180deg, rgba(255,93,115,.35), rgba(255,93,115,.12));
   border-color: var(--c-bad);
+  /* 答错手感（r15）：点错的选项自己也横向一颤，和题卡 shake 叠成「错在我这里」 */
+  animation: optWrongJolt .38s ease;
+}
+@keyframes optWrongJolt {
+  0%, 100% { transform: none; }
+  30% { transform: translateX(-6px) scale(.97); }
+  60% { transform: translateX(4px); }
 }
 /* 色弱冗余标记：对错除颜色外再给形状/文字信号（✓ 正确 / ✕ 选错）——
    deuteranopia 模拟下绿红背景色投影距离仅 ~53/765（protan 129），单靠色相不够冗余。
@@ -364,6 +408,15 @@ body {
 .q-opt.correct::before { content: '✓ '; font-weight: 900; }
 .q-opt.wrong::before { content: '✕ '; font-weight: 900; }
 .q-opt.correct { text-decoration: underline 2px; text-underline-offset: 3px; }
+/* 正确词高亮·节奏化（r15）：答错后揭示的正确答案走 .reveal——颜色/✕✓ 状态立即到位
+   （色弱冗余信号不延迟），但强调弹跳延迟 200ms 再播：先看清「我错了」，再接住
+   「正确的是它」，两拍分开（game.js 答错/超时揭示路径挂 .reveal） */
+.q-opt.reveal { animation: revealPop .5s var(--t-ease) .2s both; }
+@keyframes revealPop {
+  0% { transform: scale(.92); }
+  55% { transform: scale(1.07); }
+  100% { transform: scale(1); }
+}
 .q-opt.dim { opacity: .25; pointer-events: none; }
 .q-options.locked .q-opt { pointer-events: none; }
 @keyframes optPop { 0% { transform: scale(.9); } 60% { transform: scale(1.06); } 100% { transform: scale(1); } }
@@ -442,14 +495,16 @@ body {
 #scr-battle.theme-volcano { background: linear-gradient(180deg, #47160f 0%, #2a0d08 100%); }
 #scr-battle.theme-castle { background: linear-gradient(180deg, #2b1d47 0%, #160f26 100%); }
 
-/* ---------- 覆盖层 ---------- */
+/* ---------- 覆盖层 ----------
+   出场动效统一（r15）：所有弹层容器与弹层卡片走同一组
+   var(--t-dur)/var(--t-ease)，曲线/时长与屏幕切换同源 */
 .overlay {
   position: fixed; inset: 0; z-index: 100;
   background: rgba(8,6,20,.78);
   backdrop-filter: blur(4px);
   display: flex; align-items: center; justify-content: center;
   padding: 20px;
-  animation: screenIn .25s ease;
+  animation: screenIn var(--t-dur) var(--t-ease);
 }
 .memcard-box {
   background: linear-gradient(180deg, #3a2f86, #241d55);
@@ -459,7 +514,7 @@ body {
   max-width: 400px; width: 100%;
   text-align: center;
   box-shadow: 0 0 60px rgba(255,209,102,.25);
-  animation: memcardIn .35s cubic-bezier(.2,1.4,.4,1);
+  animation: memcardIn var(--t-dur) var(--t-ease);
 }
 @keyframes memcardIn { from { transform: scale(.6) rotate(-4deg); opacity: 0; } to { transform: none; opacity: 1; } }
 .memcard-tag { color: var(--c-accent); font-weight: 800; font-size: 14px; letter-spacing: 2px; }
@@ -516,6 +571,14 @@ body {
   display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 6px 0 4px;
 }
 .result-stats .chip { font-size: 14px; }
+/* 结算核心数据出场（r15）：chips 逐个上浮淡入（transform/opacity），随后数字滚动
+   （game.js rollResultNumbers 把整数包成 .rs-n 逐帧递增，620ms 一次性，非常驻动画） */
+.result-stats .chip { animation: homeIn var(--t-dur) var(--t-ease) both; }
+.result-stats .chip:nth-child(2) { animation-delay: 40ms; }
+.result-stats .chip:nth-child(3) { animation-delay: 80ms; }
+.result-stats .chip:nth-child(4) { animation-delay: 120ms; }
+.result-stats .chip:nth-child(5) { animation-delay: 160ms; }
+.result-stats .chip:nth-child(n+6) { animation-delay: 200ms; }
 .result-words {
   max-height: 300px; overflow-y: auto;
   background: rgba(0,0,0,.25); border-radius: var(--r-md); padding: 8px;
@@ -744,13 +807,20 @@ body {
   transition: width .3s ease;
 }
 .talent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(146px, 1fr)); gap: 10px; margin-top: 12px; }
+/* 天赋卡出场（r15）：进殿堂/每次加点重建时逐卡错峰上浮，与主页首屏渐入同曲线同时长 */
 .talent-item {
   background: rgba(255,255,255,.06);
   border: 1px solid rgba(255,255,255,.14);
   border-radius: 14px;
   padding: 12px 10px; text-align: center;
   display: flex; flex-direction: column; align-items: center; gap: 5px;
+  animation: homeIn var(--t-dur) var(--t-ease) both;
 }
+.talent-item:nth-child(2) { animation-delay: 35ms; }
+.talent-item:nth-child(3) { animation-delay: 70ms; }
+.talent-item:nth-child(4) { animation-delay: 105ms; }
+.talent-item:nth-child(5) { animation-delay: 140ms; }
+.talent-item:nth-child(n+6) { animation-delay: 175ms; }
 .talent-item.maxed { border-color: rgba(255,209,102,.55); background: rgba(255,209,102,.08); }
 .talent-icon { font-size: 30px; }
 .talent-name { font-weight: 800; font-size: 14px; color: var(--c-accent); }
@@ -783,7 +853,7 @@ body {
   color: #3a2800; font-weight: 800; font-size: 14px;
   padding: 10px 20px; border-radius: 999px; white-space: nowrap;
   box-shadow: 0 8px 24px rgba(0,0,0,.45);
-  animation: toastIn .35s cubic-bezier(.2,1.4,.4,1);
+  animation: toastIn var(--t-dur) var(--t-ease);
   max-width: 92vw; overflow: hidden; text-overflow: ellipsis;
 }
 .toast.out { opacity: 0; transform: translateY(-12px); transition: all .3s; }
@@ -936,7 +1006,7 @@ a.btn { text-decoration: none; display: inline-block; }
 }
 .mcard-front.meaning { font-size: 11px; font-weight: 600; color: #d8d4f5; }
 .mcard.done .mcard-front { background: rgba(61,220,132,.22); border-color: var(--c-good); }
-.mcard.done { animation: matchPop .35s ease; pointer-events: none; }
+.mcard.done { animation: matchPop var(--t-dur) var(--t-ease); pointer-events: none; }
 @keyframes matchPop { 0% { transform: scale(1); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
 
 /* ---------- 记忆提示（词根 + 图像） ---------- */
@@ -1024,6 +1094,22 @@ a.btn { text-decoration: none; display: inline-block; }
   transition: width .25s ease;
 }
 .pressure-bar.critical .pressure-fill { animation: pulse .4s infinite alternate; }
+/* 守城失血警示层次（r15）：压境条三档逐级升高，游戏侧 updatePressureHud 挂档位类——
+   w50 城防过半：标签转琥珀（纯色阶提示，不打断）；
+   w70 吃紧：标签橙红 + 填充换警示渐变（原 .critical 脉冲照旧叠加）；
+   w90 危急：标签红闪 + 条体红色警示光晕（box-shadow 动画只 paint，不触发 layout）。
+   城堡裂纹/火光分档照旧由 dmg-1/2/3 与 castleBurn 负责，两层警示互不挤占 */
+.pressure-wrap.w50 .pressure-label { color: #ffd166; }
+.pressure-wrap.w70 .pressure-label { color: #ff8b4d; }
+.pressure-wrap.w70 .pressure-fill { background: linear-gradient(90deg, #7a2338, #ff8b4d); }
+.pressure-wrap.w90 .pressure-label { color: var(--c-bad); animation: warnBlink .55s ease-in-out infinite; }
+.pressure-wrap.w90 .pressure-fill { background: linear-gradient(90deg, #8f1030, #ff2e4d); }
+.pressure-wrap.w90 .pressure-bar { animation: pressureGlow .8s ease-in-out infinite alternate; }
+@keyframes warnBlink { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+@keyframes pressureGlow {
+  from { box-shadow: inset 0 0 6px rgba(255,46,77,.3); }
+  to { box-shadow: inset 0 0 14px rgba(255,46,77,.75); }
+}
 .pressure-army {
   position: absolute; top: -9px; left: 0%;
   font-size: 17px;
@@ -1319,7 +1405,7 @@ a.btn { text-decoration: none; display: inline-block; }
 
 /* ---------- 记忆配对：拖拽撞击 ---------- */
 .mcard { touch-action: none; }
-.mcard-inner { transition: transform .32s cubic-bezier(.3,1.2,.4,1); }
+.mcard-inner { transition: transform var(--t-dur) var(--t-ease); }
 .mcard.drag-src { opacity: .3; }
 .mcard.drop-hint { outline: 2px solid var(--c-accent); outline-offset: 1px; border-radius: 10px; }
 .mcard-ghost {
@@ -1437,11 +1523,11 @@ a.btn { text-decoration: none; display: inline-block; }
   text-align: center;
   font-size: 15px;
   line-height: 1.6;
-  animation: screenIn .25s ease;
+  animation: screenIn var(--t-dur) var(--t-ease);
 }
 .duel-reveal .duel-gain { color: var(--c-accent); font-weight: 800; }
 .duel-handoff { text-align: center; padding: 26px 8px 18px; }
-.dh-face { font-size: 52px; animation: dhPop .45s ease; }
+.dh-face { font-size: 52px; animation: dhPop var(--t-dur) var(--t-ease); }
 @keyframes dhPop {
   from { transform: scale(.4); opacity: 0; }
   to { transform: none; opacity: 1; }
