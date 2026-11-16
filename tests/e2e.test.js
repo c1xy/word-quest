@@ -16,6 +16,10 @@
          activeElement 不落 BODY，键盘锚点始终在可交互元素或面板容器上）
      S13 触屏注入（页内合成 pointer 事件驱动记忆配对全流程：tap 翻牌/拖拽撞击/失配弹回/
          pointercancel 中断/收官续局，配对结果与焦点双断言）
+     S14 动效状态机 & 动效预算（r15：统一转场 tokens --t-dur/--t-ease 同源、主页首屏
+         渐入错峰、@keyframes 属性白名单（transform/opacity/filter/box-shadow）扫描、
+         连击换挡/答错抖动/正确词延迟强调/失血三档警示类名状态机、结算数字滚动落位、
+         横幅点按跳过、切屏回顶）
      S-PERF 性能预算（本地服务：主页加载 ≤3s、首次可交互 ≤5s、JS heap 采样入 PERF-BASELINE 行）
    依赖：playwright 或 playwright-core（找不到时整组 SKIP，退出码 0 并说明原因），
    浏览器可执行文件依次探测 playwright 自带 chromium → 环境变量 WQ_CHROME_PATH →
@@ -280,7 +284,18 @@ async function assertResult(page, label, wantTitle, wantChipPart) {
   ok(label + ' · 返回主页按钮在位', r.homeBtn);
   ok(label + ' · 再来一局按钮在位', r.againVisible);
   ok(label + ' · 「📜 本局单词回顾」节标题在位（七种结算同源结构）', r.sections.indexOf('📜 本局单词回顾') >= 0, JSON.stringify(r.sections));
-  if (wantChipPart) ok(label + ' · 含 chip「' + wantChipPart + '」', r.chips.some(c => c.indexOf(wantChipPart) >= 0), JSON.stringify(r.chips));
+  if (wantChipPart) {
+    /* r15 数字滚动：结算 chips 数字 620ms 内从 0 滚到终值——含数字的 chip 断言
+       轮询到滚动结束（最多 1.2s），避免在滚动中途读走「听写 0 词」这类瞬时值 */
+    const t0 = Date.now();
+    let hit = false, chipsNow = r.chips;
+    while (Date.now() - t0 < 1200) {
+      chipsNow = await page.evaluate(() => Array.from(document.querySelectorAll('#result-stats .chip')).map(c => c.textContent.trim()));
+      if (chipsNow.some(c => c.indexOf(wantChipPart) >= 0)) { hit = true; break; }
+      await sleep(150);
+    }
+    ok(label + ' · 含 chip「' + wantChipPart + '」', hit, JSON.stringify(chipsNow));
+  }
 }
 /* 出战设置 → 开战 */
 async function startBattleFromSetup(page, mode, size) {
@@ -517,7 +532,23 @@ if (!resolvable) {
         ok('S3-B 毒池结算标题（☠️ 噩梦通关！）', resultTitle === '☠️ 噩梦通关！', resultTitle);
         const rcVisible = await B.page.evaluate(() => !document.getElementById('btn-result-code').hidden);
         ok('S3-B 「📨 复制成绩码」按钮在位', rcVisible);
-        await B.page.click('#btn-result-code');
+        /* 点击走一次重试：本机偶发环境抖动（上方 waitResult 重试同源，r15 实测一次
+           「结算页已激活、hidden=false，但 click 连续 30s 报 not visible」；隔离复跑 9 次
+           均不复现）。重试前先确认结算页仍激活——真回归会连续失败，不会被它掩盖 */
+        let clickErr = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const still = await B.page.evaluate(() => (document.querySelector('.screen.active') || {}).id === 'scr-result');
+            if (!still) throw new Error('结算页未激活（环境抖动或回归）');
+            await B.page.click('#btn-result-code', { timeout: 12000 });
+            clickErr = null;
+            break;
+          } catch (e) {
+            clickErr = e;
+            if (attempt === 0) { console.log('S3-B 复制成绩码首次点击未果，重试一次 :: ' + e.message.split('\n')[0]); await sleep(2000); }
+          }
+        }
+        if (clickErr) throw clickErr;
         await B.page.waitForSelector('#io-overlay:not([hidden])', { timeout: 5000 });
         resultCode = await B.page.inputValue('#io-text');
         ok('S3-B 成绩码生成（R 前缀 12-18 位）', /^R[0-9A-Za-z_-]{11,17}$/.test(resultCode || ''), resultCode);
@@ -1215,10 +1246,27 @@ if (!resolvable) {
             return w && d ? { wi: w.i, di: d.i } : null;
           });
           if (!pair) break;
+          /* 触屏仿真偶发丢 tap / 撞上失配锁（r15 实测一次 1/8 对；隔离复跑 5×8/8 全成、
+             基线 R14 也在本节抖过）。两条护栏，均不掩盖真回归：
+             ① 每次 tap 前等 match.lock 释放（失配后 750ms 锁定期内 tap 被游戏忽略）；
+             ② 词卡 tap 后校验 .open，未开补 tap 一次——词卡是本轮首个翻牌且游戏对
+                已开卡直接忽略 tap（onMatchCard 的 c.open 短路），补 tap 无副作用；
+             ③ 释义卡（完成配对的那一下）绝不按 .open 校验/补 tap：配对成功时游戏立即
+                done=true 且 open=false，对着已配对卡（pointer-events:none + matchPop）
+                补 tap 会让 playwright 卡死在 not stable/intercepts（r15 首版加固误伤，已撤）。
+             游戏侧若真坏了（tap 翻不开牌），补 tap 后仍 open=false，8/8 断言照常失败 */
+          await page.waitForFunction(() => !(typeof match !== 'undefined' && match && match.lock), { timeout: 2500 }).catch(() => {});
           await page.tap('#match-grid .mcard >> nth=' + pair.wi);
           await sleep(260);
+          const wOpen = await page.evaluate(i => document.querySelectorAll('#match-grid .mcard')[i].classList.contains('open'), pair.wi);
+          if (!wOpen) {
+            await page.waitForFunction(() => !(typeof match !== 'undefined' && match && match.lock), { timeout: 2500 }).catch(() => {});
+            await page.tap('#match-grid .mcard >> nth=' + pair.wi);
+            await sleep(260);
+          }
+          await page.waitForFunction(() => !(typeof match !== 'undefined' && match && match.lock), { timeout: 2500 }).catch(() => {});
           await page.tap('#match-grid .mcard >> nth=' + pair.di);
-          await sleep(240);
+          await sleep(300);
           await assertFocus('S12-⑤ 配对第 ' + (round + 1) + ' 对后焦点不掉 BODY');
         }
         const pairs12 = await page.evaluate(() => document.getElementById('match-pairs').textContent);
@@ -1342,6 +1390,220 @@ if (!resolvable) {
         ok('S13-⑤ 续局后焦点不落 BODY（' + (await aeDesc()) + '）', (await aeDesc()) !== 'BODY', await aeDesc());
         ok('S13 无页面异常（pageerror=0）', c13.errors.length === 0, c13.errors.join(' | '));
         await c13.context.close();
+      }
+
+      /* ============ S14 · r15 动效状态机 & 动效预算 ============
+         手感层的类名/属性状态机断言 + 动效性能预算回归：
+         A. 统一转场：:root 挂 --t-dur/--t-ease；屏切换/弹层容器/弹层卡片/对决揭示
+            四处 animation-duration 同源（= --t-dur 计算值 0.32s）。
+         B. 主页首屏渐入：logo 同时挂 homeIn+logoBob，第 4 块（stat-chips）错峰 135ms。
+         C. 关键帧预算：扫 styleSheets 全部 @keyframes，属性 ⊆ {transform,opacity,
+            filter,box-shadow}——只许合成/绘制层属性，禁止 width/left/margin 等
+            layout 属性混入（答题循环 60fps 底线的回归护栏）。
+         D. 连击节奏：连答 3 → scr-battle.combo-heat-1 + 徽章 .show+.tier-up（换挡重锤）；
+            答错（连击≥3 被打断）→ q-card.shake + .q-opt.wrong + 正确项
+            .correct.reveal（延迟强调）+ 💔 连击中断 fx。
+         E. 失血警示层次：注入 addPressure 直达 55%/90%——pressure-wrap.w50/.w90、
+            dmg-1/dmg-3 裂纹分档、critical 条、标签文案三档联动。
+         F. 结算数字滚动：.rs-n 滚动完成后 data-v === textContent（不残留中间值）。
+         G. 横幅点按跳过：tap #banner → 立即 hidden 且后续题目照常渲染。
+         H. 切屏回顶：图鉴滚到深处 → 返回主页 scrollY===0（r15 瑕疵修复回归）。 */
+      console.log('---- S14 动效状态机 & 动效预算 ----');
+      {
+        const c14 = await newContext(browser, baseSave());
+        const page = c14.page;
+        const errors14 = [];
+        page.on('pageerror', e => errors14.push(e.message));
+        await page.goto(BASE_URL + '/', { waitUntil: 'load' });
+        await page.waitForSelector('#scr-home.active', { timeout: 15000 });
+
+        // A. 统一转场 tokens 与四处出场动效同源
+        const uni = await page.evaluate(() => {
+          const cs = el => getComputedStyle(el);
+          const root = document.documentElement;
+          const home = document.getElementById('scr-home');
+          const memOv = document.getElementById('memcard');
+          const memBox = memOv.querySelector('.memcard-box');
+          const duelRev = document.getElementById('duel-reveal');
+          return {
+            tDur: root.style.getPropertyValue('--t-dur') || getComputedStyle(root).getPropertyValue('--t-dur').trim(),
+            tEase: root.style.getPropertyValue('--t-ease') || getComputedStyle(root).getPropertyValue('--t-ease').trim(),
+            homeDur: cs(home).animationDuration,
+            memOvDur: cs(memOv).animationDuration,
+            memBoxDur: cs(memBox).animationDuration,
+            duelDur: cs(duelRev).animationDuration
+          };
+        });
+        ok('S14-A :root 挂 --t-dur/--t-ease（' + uni.tDur + ' / ' + uni.tEase.slice(0, 26) + '…）',
+          uni.tDur.indexOf('s') >= 0 && uni.tEase.indexOf('cubic-bezier') >= 0, JSON.stringify(uni));
+        ok('S14-A 屏切换/弹层容器/弹层卡片/对决揭示时长同源（' + [uni.homeDur, uni.memOvDur, uni.memBoxDur, uni.duelDur].join(' / ') + '）',
+          uni.homeDur === uni.memOvDur && uni.memOvDur === uni.memBoxDur && uni.memBoxDur === uni.duelDur && uni.homeDur !== '0s',
+          JSON.stringify(uni));
+
+        // B. 主页首屏渐入：logo 双动画 + 逐块错峰
+        const homeFx = await page.evaluate(() => {
+          const cs = el => getComputedStyle(el);
+          const kids = document.querySelectorAll('.home-inner > *');
+          return {
+            logoName: cs(document.querySelector('.logo')).animationName,
+            logoDur: cs(document.querySelector('.logo')).animationDuration,
+            chipsDelay: cs(kids[3]).animationDelay,
+            chipsName: cs(kids[3]).animationName
+          };
+        });
+        ok('S14-B logo 挂 homeIn+logoBob（' + homeFx.logoName + '）',
+          homeFx.logoName.indexOf('homeIn') >= 0 && homeFx.logoName.indexOf('logoBob') >= 0, homeFx.logoName);
+        ok('S14-B 首屏逐块错峰（第 4 块 delay=' + homeFx.chipsDelay + '）',
+          homeFx.chipsName.indexOf('homeIn') >= 0 && parseFloat(homeFx.chipsDelay) > 0 && parseFloat(homeFx.chipsDelay) <= 0.2, JSON.stringify(homeFx));
+
+        // C. 关键帧预算：全部 @keyframes 属性 ⊆ 合成/绘制层白名单
+        /* 注意：@keyframes 容器的 CSSRule.type 是 7（KEYFRAMES_RULE），8 是容器内层的
+           KEYFRAME_RULE——首版按 8 过滤顶层规则，扫过 0 组，断言空转。这里改用
+           instanceof CSSKeyframesRule 判定（S14-C 扫过 0 组 = 测试自身的 bug，r15 修正） */
+        const kfScan = await page.evaluate(() => {
+          const ALLOWED = ['transform', 'opacity', 'filter', 'box-shadow'];
+          const bad = [];
+          let count = 0;
+          for (const ss of Array.from(document.styleSheets)) {
+            let rules;
+            try { rules = ss.cssRules; } catch (e) { continue; }
+            if (!rules) continue;
+            for (let i = 0; i < rules.length; i++) {
+              const r = rules[i];
+              const isKf = (typeof CSSKeyframesRule !== 'undefined' && r instanceof CSSKeyframesRule) || r.type === 7;
+              if (!isKf) continue;
+              count++;
+              const kfs = r.cssRules || [];
+              for (let j = 0; j < kfs.length; j++) {
+                const st = kfs[j].style;
+                for (let k = 0; k < st.length; k++) {
+                  const p = st[k];
+                  if (ALLOWED.indexOf(p) < 0) bad.push(r.name + ':' + p);
+                }
+              }
+            }
+          }
+          return { bad: bad, count: count };
+        });
+        ok('S14-C 关键帧预算：@keyframes 属性全在 transform/opacity/filter/box-shadow 内（扫过 ' + kfScan.count + ' 组）',
+          kfScan.bad.length === 0 && kfScan.count > 0, kfScan.bad.join(' | ') || ('count=' + kfScan.count));
+
+        // D. 战斗动效状态机：连击档位 / 答错抖动+正确词高亮 / 连击中断反馈
+        await page.click('#btn-endless');
+        await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+        await page.click('#btn-start');
+        await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        // 连答 3 题正确（无尽模式怪 1 血，连击跨过 heat-1 档）；拼写题（无选项）等待超时换题不计次
+        let comboState = { combo: 0, show: false, tier: false, heat1: false };
+        for (let i = 0; i < 16 && comboState.combo < 3; i++) {
+          const st = await page.evaluate(READ_STATE);
+          if (st.ended) break;
+          if (st.memcard) { await page.click('#mem-ok').catch(() => {}); await sleep(300); continue; }
+          if (st.locked) { await sleep(300); continue; }
+          const want = st.qtype === 'e2c' ? st.meaning : st.word;
+          const idx = st.opts.findIndex(o => o === want);
+          if (idx < 0) { await sleep(400); continue; }
+          await page.click('#q-options .q-opt >> nth=' + idx);
+          comboState = await page.evaluate(() => {
+            const b = document.getElementById('battle-combo');
+            const s = document.getElementById('scr-battle');
+            return { show: b.classList.contains('show'), tier: b.classList.contains('tier-up'),
+              heat1: s.classList.contains('combo-heat-1'), combo: (typeof run !== 'undefined' && run) ? run.combo : 0 };
+          });
+          await sleep(1100);
+        }
+        ok('S14-D 连击徽章 .show（连答至 ≥3 连）', comboState.combo >= 3 && comboState.show, JSON.stringify(comboState));
+        ok('S14-D 连击跨档徽章重锤 .tier-up（3 连档位抬升瞬间）', comboState.tier);
+        ok('S14-D 全屏火浪档位 combo-heat-1（≥3 连）', comboState.heat1);
+        // 答错 1 次：抖动 + ✕ + 正确项 .correct.reveal 双类 + 连击中断 fx（连击 3 已攒够）
+        let shakeSeen = false, revealSeen = false, breakFxSeen = false;
+        for (let t = 0; t < 25 && !shakeSeen; t++) {
+          const st = await page.evaluate(READ_STATE);
+          if (st.ended) break;
+          if (st.memcard) { await page.click('#mem-ok').catch(() => {}); await sleep(280); continue; }
+          if (st.locked) { await sleep(300); continue; }
+          const wrongIdx = Math.max(0, st.opts.findIndex(o => o !== st.word));
+          await page.click('#q-options .q-opt >> nth=' + wrongIdx);
+          const fx = await page.evaluate(() => ({
+            shake: document.getElementById('q-card').classList.contains('shake'),
+            wrong: document.querySelectorAll('#q-options .q-opt.wrong').length,
+            reveal: document.querySelectorAll('#q-options .q-opt.correct.reveal').length,
+            brk: Array.prototype.some.call(document.querySelectorAll('#fx-layer .fx-dmg'), n => n.textContent.indexOf('连击被打断') >= 0)
+          }));
+          shakeSeen = fx.shake;
+          revealSeen = fx.wrong >= 1 && fx.reveal === 1;
+          breakFxSeen = fx.brk;
+          await sleep(500);
+        }
+        ok('S14-D 答错题卡抖动 .shake', shakeSeen);
+        ok('S14-D 答错标 ✕ 且正确项挂 .correct.reveal（延迟强调双类）', revealSeen);
+        ok('S14-D 连击≥3 被打断出现 💔 中断反馈', breakFxSeen);
+        // 关掉可能弹出的记忆卡再注入压境值（怪 1 血无尽局答错后必有记忆卡链）
+        for (let t = 0; t < 10; t++) {
+          const st = await page.evaluate(READ_STATE);
+          if (!st.memcard) break;
+          await page.click('#mem-ok').catch(() => {});
+          await sleep(280);
+        }
+        // E. 失血警示层次：注入 addPressure（真实游戏函数）直达三档（52 → w50/dmg-1，+40 → 92 w90/dmg-3/critical）
+        const w50 = await page.evaluate(() => { addPressure(52); return {
+          wrap: document.getElementById('pressure-wrap').className,
+          label: document.getElementById('pressure-label').textContent }; });
+        ok('S14-E 过半档：pressure-wrap 挂 w50+dmg-1（' + w50.label + '）',
+          w50.wrap.indexOf('w50') >= 0 && w50.wrap.indexOf('dmg-1') >= 0, w50.wrap);
+        const w90 = await page.evaluate(() => { addPressure(40); return {
+          wrap: document.getElementById('pressure-wrap').className,
+          bar: document.getElementById('pressure-bar').className,
+          label: document.getElementById('pressure-label').textContent }; });
+        ok('S14-E 危急档：w90+dmg-3+critical 全挂（' + w90.label + '）',
+          w90.wrap.indexOf('w90') >= 0 && w90.wrap.indexOf('dmg-3') >= 0 && w90.bar.indexOf('critical') >= 0, w90.wrap + ' / ' + w90.bar);
+        // 撤退进结算（F. 数字滚动断言）
+        await quitBattle(page);
+        await waitResult(page, 15000);
+        await sleep(850);   // 等 620ms 数字滚动收官
+        const roll = await page.evaluate(() => {
+          const ns = Array.from(document.querySelectorAll('#result-stats .rs-n'));
+          return {
+            n: ns.length,
+            done: ns.every(b => b.textContent === b.getAttribute('data-v')),
+            chipAnim: getComputedStyle(document.querySelector('#result-stats .chip')).animationName
+          };
+        });
+        ok('S14-F 结算数字滚动落位：.rs-n ' + roll.n + ' 个且 data-v===textContent', roll.n >= 3 && roll.done,
+          JSON.stringify(roll));
+        ok('S14-F 结算 chips 逐个上浮（homeIn）', roll.chipAnim.indexOf('homeIn') >= 0, roll.chipAnim);
+        // G. 横幅点按跳过：再开一局冒险，横幅出现即点
+        await page.click('#btn-result-home');
+        await page.waitForSelector('#scr-home.active', { timeout: 8000 });
+        await page.click('#btn-adventure');
+        await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+        await page.click('#btn-start');
+        await page.waitForSelector('#banner:not([hidden])', { timeout: 8000 });
+        await page.click('#banner');
+        const bannerGone = await page.evaluate(() => document.getElementById('banner').hidden);
+        ok('S14-G 横幅点按立即跳过（hidden=true）', bannerGone);
+        await sleep(600);
+        const qReady = await page.evaluate(() => typeof run !== 'undefined' && !!run && !!run.q
+          && document.getElementById('scr-battle').classList.contains('active'));
+        ok('S14-G 跳过后题目照常渲染（run.q 就位）', qReady);
+        // H. 切屏回顶：图鉴滚到深处 → 返回主页 scrollY===0
+        await quitBattle(page);
+        await waitResult(page, 15000);
+        await sleep(850);
+        await page.click('#btn-result-home');
+        await page.waitForSelector('#scr-home.active', { timeout: 8000 });
+        await page.click('#btn-codex');
+        await page.waitForSelector('#scr-codex.active', { timeout: 5000 });
+        await page.evaluate(() => window.scrollTo(0, 99999));
+        await sleep(150);
+        const deepY = await page.evaluate(() => window.scrollY);
+        await page.click('#btn-codex-back');
+        await page.waitForSelector('#scr-home.active', { timeout: 8000 });
+        const backY = await page.evaluate(() => window.scrollY);
+        ok('S14-H 图鉴深处滚动生效（scrollY=' + deepY + '）', deepY > 200, 'deepY=' + deepY);
+        ok('S14-H 返回主页回顶（scrollY=' + backY + '，r15 瑕疵修复回归）', backY === 0, 'backY=' + backY);
+        ok('S14 无页面异常（pageerror=0）', errors14.length === 0, errors14.join(' | '));
+        await c14.context.close();
       }
 
       /* ============ S-PERF · 性能预算基线（本地服务 · 每轮对比） ============ */

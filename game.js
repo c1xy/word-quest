@@ -891,6 +891,7 @@ function addXp(n) {
   if (save.xp >= xpNeed(save.level)) save.xp = 0;
   if (up) {
     toast('⭐ 等级提升！Lv.' + save.level + ' · 获得 1 天赋点（主界面「✨ 天赋」加点）');
+    fxScreenVignette(false);   /* r15：升级出场统一——金白一闪与彩带/升级音同一时刻，曲线全站同源 */
     Confetti.burst(50);
     Sfx.levelup();
   }
@@ -1682,6 +1683,9 @@ function startMatch() {
   });
   cards = shuffle(cards);
   match = { cards: cards, openIdx: [], matched: 0, moves: 0, lock: false, t0: Date.now(), finished: false, total: picks.length };
+  /* r15 遗留清零：计时器 1s 才走第一拍——不立即重置的话，续局开头 ~1 秒里
+     #match-time 残留上一局的时长（比如上局打了 40 秒，新局先显示「⏱ 40 秒」） */
+  $('match-time').textContent = '⏱ 0 秒';
   renderMatch();
   if (matchTimer) { clearInterval(matchTimer); matchTimer = null; }
   matchTimer = setInterval(function () {
@@ -3493,7 +3497,9 @@ function onChoice(i, btn) {
     btn.classList.add('wrong');
     $('q-options').classList.add('locked');
     var correctBtn = $('q-options').children[q.answer];
-    if (correctBtn) correctBtn.classList.add('correct');
+    /* .reveal（r15 手感）：状态色/✓ 标记立即到位（色弱冗余信号不延迟），强调弹跳
+       延迟 200ms 再播——「我错了」和「正确的是它」两拍分开（CSS revealPop） */
+    if (correctBtn) correctBtn.classList.add('correct', 'reveal');
     resolve(false);
   }
 }
@@ -3519,18 +3525,45 @@ function useHint() {
 
 /* ========================= 计时器 + 大军压境 ========================= */
 var timerRAF = null, timerEnd = 0, timerDur = 1, lastTickT = 0;
+var tickLastPct = -1;      /* r15：timer-fill 宽度量化去重的上次写入值（-1=强制写） */
+var comboTierTimer = null; /* r15：连击换挡徽章重脉冲的摘除定时器 */
 
 function addPressure(n) {
   if (!run || run.ended) return;
   if (n > 0 && run.realm && run.realm.castle !== 1) n = n * run.realm.castle;   /* 词境参数：城防血量倍率（0.5~2.0），只放大敌方推进 */
-  if (n < 0) { run.pressure = Math.max(0, run.pressure + n); updateHUD(); return; }
+  if (n < 0) {
+    run.pressure = Math.max(0, run.pressure + n);
+    /* r15 修正：回落同步降警示档——否则一旦到过 90，warnTier 恒为 3，
+       击退后再涨过 70/90 不会重新报警（与本段注释承诺矛盾） */
+    run.warnTier = run.pressure >= 90 ? 3 : (run.pressure >= 70 ? 2 : (run.pressure >= 50 ? 1 : 0));
+    updateHUD();
+    return;
+  }
   run.pressure = Math.min(100, run.pressure + n);
-  updateHUD();
+  updatePressureHud(false);   /* r15：creep 每帧 +0.0x% 走轻路径，不再整帧刷全 HUD */
+  /* 失血警示层次（r15）：50 过半（只变色阶）→ 70 吃紧（声画双警示）→ 90 危急
+     （急促三连音）。抬档瞬间触发；答对击退回落后再涨过阈值会重新报警。
+     城堡裂纹/火光分档照旧由 updateCastleViz 的 dmg-1/2/3 管理，两层互补 */
+  var t = run.pressure >= 90 ? 3 : (run.pressure >= 70 ? 2 : (run.pressure >= 50 ? 1 : 0));
+  if (t > (run.warnTier || 0)) {
+    if (t === 2) {
+      fx('⚠️ 城防吃紧！', 'bad', 50, 14);
+      Sfx.tone(523, .12, 'square', 0, .05);
+      Sfx.tone(392, .18, 'square', .13, .05);
+    } else if (t === 3) {
+      fx('🚨 城防危急！', 'bad', 50, 14);
+      Sfx.tone(784, .1, 'square', 0, .06);
+      Sfx.tone(784, .1, 'square', .13, .06);
+      Sfx.tone(988, .18, 'square', .26, .06);
+    }
+  }
+  run.warnTier = t;
   if (run.pressure >= 100) {
     /* 不灭意志天赋：每局一次，城破瞬间稳住城墙 */
     if (talentLv('will') && !run.willUsed) {
       run.willUsed = true;
       run.pressure = 70;
+      run.warnTier = 2;   /* 回落到 70：警示档同步（此后再破 90 仍会急促三连音报警） */
       updateHUD();
       fx('🕯️ 不灭意志！城墙稳住了！', 'good', 50, 30);
       toast('🕯️ 天赋「不灭意志」触发：压境回落到 70%');
@@ -3549,6 +3582,7 @@ function startTimer(sec) {
   stopTimer();
   timerDur = sec * 1000;
   lastTickT = 0;
+  tickLastPct = -1;   /* 新题从满条起算：首帧强制写宽度（r15 量化去重标记复位） */
   /* 战斗页接力弹层暂停中（或页面切后台）：题面照常渲染，但不设 deadline（设了会按墙钟逼近，
      长暂停后一关闭/回前台就立刻超时）——时长暂存，relayResumeBattleTimer / 后台恢复补偿续跑时起算 */
   if (relayTimerSuppressed() || hiddenBattlePaused) { timerPendingSec = sec; timerEnd = 0; return; }
@@ -3564,8 +3598,16 @@ function tick() {
     var left = timerEnd - now;
     var r = Math.max(0, left / timerDur);
     var f = $('timer-fill');
-    f.style.width = (r * 100) + '%';
-    f.className = 'timer-fill' + (r < 0.2 ? ' danger' : (r < 0.45 ? ' warn' : ''));
+    /* r15 低端机不卡帧：宽度写按 0.25% 步进去重（fill 自带 .1s linear 过渡补间，
+       视觉无差）——答题循环里 rAF 链每帧 60Hz 的 style.width 布局触发降到 ~25Hz 峰值。
+       状态类（warn/danger）照旧每帧比对，变了立即切换 */
+    var cls = 'timer-fill' + (r < 0.2 ? ' danger' : (r < 0.45 ? ' warn' : ''));
+    if (f.className !== cls) f.className = cls;
+    var pct = r * 100;
+    if (tickLastPct < 0 || Math.abs(pct - tickLastPct) >= 0.25 || (pct === 0 && tickLastPct !== 0)) {
+      f.style.width = pct + '%';
+      tickLastPct = pct;
+    }
     /* 大军压境：答题期间敌军持续推进，关卡越高推得越快 */
     if (run && (run.mode === 'adventure' || run.mode === 'endless' || run.mode === 'expedition') && run.q && !run.q.locked && run.pressure < 100) {
       var creep = run.mode === 'endless' ? 0.5 + run.kills * 0.04 : 0.45 + (run.stage - 1) * 0.07;
@@ -3592,7 +3634,7 @@ function onTimeout() {
     if (q.type === 'c2e' || q.type === 'e2c' || q.type === 'listen') {
       $('q-options').classList.add('locked');
       var cb = $('q-options').children[q.answer];
-      if (cb) cb.classList.add('correct');
+      if (cb) cb.classList.add('correct', 'reveal');   /* 超时揭示同样走延迟强调（r15） */
     }
     resolve(false, true);
   } catch (e) { noteError('onTimeout', e); recoverBattle(); }
@@ -3737,7 +3779,9 @@ function resolveCore(ok, timedOut) {
     if (run.monster.hp <= 0) {
       killMonster();
     } else {
-      fx('BOSS 受伤了！再来！', 'good', 25, 22);
+      /* r15 体验瑕疵修复：普通怪多血（词境怪血倍率/肉鸽溅射残血/毒池硬度）时也会走
+         这里，原文案一律「BOSS 受伤了！」——按真实身份给文案 */
+      fx(run.monster.boss ? 'BOSS 受伤了！再来！' : '命中！', 'good', 25, 22);
       var hitSeq = runEpoch;
       setTimeout(safe(function () {
         if (!run || run.ended || runEpoch !== hitSeq) return;
@@ -3745,6 +3789,7 @@ function resolveCore(ok, timedOut) {
       }, 'hit-chain'), 700);
     }
   } else {
+    var lostCombo = run.combo;   /* r15：连击被打断——≥3 连断掉给一记明确反馈 */
     run.combo = 0;
     run.wrongTotal++;
     rec.wrong++;
@@ -3777,6 +3822,7 @@ function resolveCore(ok, timedOut) {
     Sfx.wrong();
     $('q-card').classList.add('shake');
     setTimeout(function () { $('q-card').classList.remove('shake'); }, 450);
+    if (lostCombo >= 3) fx('💔 ' + lostCombo + ' 连击被打断！', 'bad', 25, 30);
     fxScreenVignette(true);          /* 全屏红色边缘一闪：失误警示 */
     revealRune(word);
     if (combatLike()) castleHitFx(); /* 城堡被撞了一下：火花 + 抖动 */
@@ -4266,6 +4312,7 @@ function endRunCore(reason) {
     if (run.mode === 'plan') stats.push('🎯 计划完成 ' + run.kills + ' 词');
     stats.push('✏️ 答题 ' + run.answered + ' 题', '🎯 正确率 ' + acc + '%', '🔥 最高连击 ' + run.maxCombo, '🪙 获得 ' + run.coinsEarned, '📅 连续打卡 ' + save.streak.count + ' 天');
     $('result-stats').innerHTML = stats.map(function (s) { return '<span class="chip">' + s + '</span>'; }).join('');
+    rollResultNumbers($('result-stats'));   /* r15：结算数字滚动（620ms easeOut，一次性） */
   } catch (e) {
     try { $('result-stats').textContent = '✏️ 答题 ' + (run.answered || 0) + ' 题 · 本局战绩已保存'; } catch (x) {}
   }
@@ -4333,6 +4380,45 @@ function emergencyEndRun(reason) {
   flushSwReload();
 }
 
+/* ---------- 结算数字滚动（r15）----------
+   把 result-stats 各 chip 里的整数包成 .rs-n（保持最终文本不变，纯强调标粗），
+   从 0 滚到目标值：620ms 单发 rAF、easeOutCubic，全部 chip 合并进同一条循环
+   （不每 chip 一起 rAF）。非常驻动画；prefers-reduced-motion 时直接跳过。
+   测试锚点：滚动结束后 .rs-n 的 data-v 与文本一致（e2e S14 断言） */
+function rollResultNumbers(wrap) {
+  if (!wrap) return;
+  var chips = wrap.querySelectorAll('.chip');
+  var nums = [];
+  for (var i = 0; i < chips.length; i++) {
+    var c = chips[i];
+    if (!/\d/.test(c.textContent)) continue;
+    /* 只包我们自己生成的战绩文本（emoji + 固定标签 + 数字），textContent 原样保留 */
+    var html = c.textContent.replace(/(\d+)/g, '<b class="rs-n" data-v="$1">$1</b>');
+    var bs;
+    try { c.innerHTML = html; } catch (e) { continue; }
+    bs = c.querySelectorAll('.rs-n');
+    for (var j = 0; j < bs.length; j++) nums.push(bs[j]);
+  }
+  if (!nums.length) return;
+  var reduced = false;
+  try { reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+  if (reduced) return;
+  var DUR = 620, t0 = performance.now();
+  var step = function (now) {
+    var k = Math.min(1, (now - t0) / DUR);
+    var e = 1 - Math.pow(1 - k, 3);
+    for (var i = 0; i < nums.length; i++) {
+      var b = nums[i];
+      if (b._done) continue;
+      var v = parseInt(b.getAttribute('data-v'), 10) || 0;
+      b.textContent = String(Math.round(v * e));
+      if (k >= 1) { b.textContent = String(v); b._done = true; }
+    }
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 /* 结算页战绩可视化：一题一柱，绿柱高度=当时连击，红点=失误，星标=最高连击点 */
 function drawResultViz() {
   var cv = $('result-canvas');
@@ -4397,6 +4483,35 @@ function retryWrong() {
 }
 
 /* ========================= HUD / 特效 / 覆盖层 ========================= */
+/* ---------- 压境条轻量刷新（r15 低端机不卡帧）----------
+   答题计时每帧 creep +0.0x% 压境值，原先 addPressure 每帧整调 updateHUD：
+   金币/连击/关卡名/怪血/增益/宠物全刷一遍，答题循环每帧几十次无效 DOM 写。
+   这里只写压境相关节点，并按 0.2% 粒度去重（creep ~0.45%/s → 每秒 2-3 次真实
+   写入；fill 自带 .25s 过渡补间，视觉无差）。force=true 全量写（开题/开局面板
+   级刷新，跨局缓存值不可信时必须落 DOM） */
+function updatePressureHud(force) {
+  if (!run) return;
+  if (!(run.mode === 'adventure' || run.mode === 'endless' || run.mode === 'expedition')) return;
+  var p2 = Math.round(run.pressure * 5) / 5;          /* 0.2% 粒度量化 */
+  if (!force && p2 === updatePressureHud._last) return;
+  updatePressureHud._last = p2;
+  var p = Math.round(p2);
+  $('pressure-fill').style.width = p + '%';
+  $('pressure-army').style.left = p + '%';
+  var guard = Math.max(0, 100 - p);
+  var label = $('pressure-label');
+  var lt = '城防 ' + guard + '%';
+  if (label.textContent !== lt) label.textContent = lt;
+  var hpText = $('hero-hp-text');
+  var ht = '🏰 城防 ' + guard + '%';
+  if (hpText.textContent !== ht) hpText.textContent = ht;
+  $('pressure-bar').classList.toggle('critical', p >= 70);
+  var wrap = $('pressure-wrap');
+  wrap.classList.toggle('w50', p >= 50);   /* 失血警示三档（CSS：标签色阶/红闪/条体光晕） */
+  wrap.classList.toggle('w70', p >= 70);
+  wrap.classList.toggle('w90', p >= 90);
+  updateCastleViz();   /* 城堡裂纹分档 + 火光烟雾随压境值变化 */
+}
 function updateHUD() {
   if (!run) return;
   $('battle-coins').textContent = save.coins;
@@ -4416,6 +4531,18 @@ function updateHUD() {
   scrB.classList.toggle('combo-heat-1', heat === 1);
   scrB.classList.toggle('combo-heat-2', heat === 2);
   scrB.classList.toggle('combo-heat-3', heat === 3);
+  /* 连击换挡重锤（r15 手感）：连击跨过 3/6/10 档位那一拍，徽章重脉冲一记 + 上行
+     双音提示（与 Sfx.correct 的逐连半音递进叠成两条音高线索），回落不触发 */
+  if (heat > (run._comboHeat || 0) && combo.classList.contains('show')) {
+    combo.classList.remove('tier-up');
+    void combo.offsetWidth;
+    combo.classList.add('tier-up');
+    if (comboTierTimer) clearTimeout(comboTierTimer);
+    comboTierTimer = setTimeout(function () { combo.classList.remove('tier-up'); }, 540);
+    Sfx.tone(620 + heat * 140, .12, 'triangle', 0, .045);
+    Sfx.tone(830 + heat * 140, .18, 'triangle', .11, .045);
+  }
+  run._comboHeat = heat;
 
   if (run.mode === 'adventure') {
     if (run.poison) {
@@ -4461,15 +4588,7 @@ function updateHUD() {
   $('pressure-wrap').style.display = combat ? '' : 'none';
   var heroBar = $('hero-hp-fill').parentElement;
   heroBar.style.display = 'none';   /* 守城模式不再用血条 */
-  if (combat) {
-    var p = Math.round(run.pressure);
-    $('pressure-fill').style.width = p + '%';
-    $('pressure-army').style.left = p + '%';
-    $('pressure-label').textContent = '城防 ' + Math.max(0, 100 - p) + '%';
-    $('pressure-bar').classList.toggle('critical', p >= 70);
-    $('hero-hp-text').textContent = '🏰 城防 ' + Math.max(0, 100 - p) + '%';
-    updateCastleViz();   /* 城堡裂纹分档 + 火光烟雾随压境值变化 */
-  }
+  if (combat) updatePressureHud(true);   /* 全量刷新走 force（压境节点细节见 updatePressureHud） */
   var buffs = [];
   if (run.shields) buffs.push('🛡️×' + run.shields);
   if (run.hgStack) buffs.push('⏳+' + run.hgStack + 's');
@@ -4555,7 +4674,7 @@ function closeMemCard() {
   if (cb) cb();
 }
 
-var bannerTimer = null;
+var bannerTimer = null, bannerCb = null;
 function showBanner(main, sub, cb, dur) {
   var box = $('banner-box');
   box.innerHTML = main + (sub ? '<small>' + sub + '</small>' : '');
@@ -4563,11 +4682,19 @@ function showBanner(main, sub, cb, dur) {
   void box.offsetWidth;
   box.style.animation = '';
   $('banner').hidden = false;
+  bannerCb = cb || null;
   if (bannerTimer) clearTimeout(bannerTimer);
-  bannerTimer = setTimeout(function () {
-    $('banner').hidden = true;
-    if (cb) cb();
-  }, dur || 1500);
+  bannerTimer = setTimeout(hideBanner, dur || 1500);
+}
+/* r15 体验瑕疵修复：横幅（关卡开始/Boss 登场）原先只能干等 ~1.5s 自然关闭——
+   全屏 overlay 挡住一切点击，急着开打的玩家没有「跳过」手段。现在点横幅任意处
+   立即关闭并照常执行后续链（cb）；hidden 守卫防超时+连点双触发 cb */
+function hideBanner() {
+  if ($('banner').hidden) return;
+  if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
+  $('banner').hidden = true;
+  var cb = bannerCb; bannerCb = null;
+  if (cb) cb();
 }
 
 function applyTheme(idx) {
@@ -4640,6 +4767,10 @@ function showScreen(id) {
   document.querySelectorAll('.screen').forEach(function (s) {
     s.classList.toggle('active', s.id === id);
   });
+  /* 回顶（r15 体验瑕疵修复）：文档级滚动位置跨屏共享——在图鉴/帮助长页滚到中部后
+     切回主页/出战准备，新屏会从旧滚动深度开始显示，首屏内容「不翼而飞」。
+     每次切屏把滚动锚回顶部，进入/返回都从屏首开始 */
+  try { window.scrollTo(0, 0); } catch (e) {}
   /* 焦点锚点（r14 焦点管理专项）：切屏会隐藏旧屏上正持有焦点的控件（各屏返回键、
      入口键），焦点掉到 BODY 后 Tab 要从文档头重新数起。把焦点显式交给新屏容器
      （各 section 带 tabindex=-1，不进 Tab 序、Enter/空格无默认行为），键盘/读屏
@@ -5566,6 +5697,13 @@ function duelHandoff() {
   $('duel-ho-sub').textContent = '第 ' + (Math.floor(duel.turn / 2) + 1) + '/' + DUEL_ROUNDS + ' 题 · 全场 ' +
     (DUEL_ROUNDS * 2) + ' 问 · 每题 ' + DUEL_SEC + ' 秒';
   duelScoreboard();
+  /* r15 遗留清零：#duel-qarea 隐藏会带走焦点（上一题选项正持有焦点），焦点掉 BODY 后
+     Tab 要从文档头重新数起；键盘作答后焦点还可能留在屏容器上，下一位玩家仍要 Tab 找按钮。
+     交接横幅的唯一动作就是「我准备好了」——每次出现都把焦点显式交给它，递过设备的
+     下一位玩家按 Enter/空格即开题 */
+  if (!$('duel-handoff').contains(document.activeElement)) {
+    try { $('btn-duel-ready').focus({ preventScroll: true }); } catch (e) { try { $('btn-duel-ready').focus(); } catch (e2) {} }
+  }
 }
 function duelReady() {
   if (!duel || duel.phase !== 'handoff') return;
@@ -5612,6 +5750,13 @@ function duelShowQ() {
     wrap.appendChild(b);
   });
   duelScoreboard();
+  /* r15 遗留清零（对称）：duelHandoff 把焦点交给 #btn-duel-ready 后，本函数隐藏
+     交接横幅又把焦点抖掉到 BODY。照战斗页 renderQuestion 的锚点惯例（不预选选项，
+     避免读屏/视觉偏差第一项），焦点落回 #scr-duel 屏容器（tabindex=-1，不进 Tab 序），
+     键盘 1-4 数字键照常作答、Tab 从屏内继续 */
+  if (document.activeElement === document.body || $('duel-handoff').contains(document.activeElement)) {
+    try { $('scr-duel').focus({ preventScroll: true }); } catch (e) { try { $('scr-duel').focus(); } catch (e2) {} }
+  }
   duel.end = Date.now() + DUEL_SEC * 1000;
   duel.paused = 0;
   startDuelTimer();
@@ -5753,7 +5898,14 @@ function onKey(e) {
   }
   if (!run || run.ended) return;
   if (!$('memcard').hidden || !$('banner').hidden) {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); closeMemCard(); }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      /* r15 体验瑕疵修复：记忆卡与横幅共用这条按键通道，但 closeMemCard 对隐藏的
+         记忆卡直接 early-return——横幅在场时 Enter/空格被吞掉却关不掉横幅，键盘玩家
+         只能干等 1.5s。现在各自走各自的关闭口（横幅键盘跳过与点按跳过同一条链） */
+      if (!$('memcard').hidden) closeMemCard();
+      else hideBanner();
+    }
     return;
   }
   if (!$('scr-battle').classList.contains('active')) return;
@@ -5865,7 +6017,18 @@ function bindEvents() {
   $('btn-duel-start').onclick = startDuelGame;
   $('btn-duel-ready').onclick = duelReady;
   $('btn-duel-back').onclick = function () {
-    if (duel && duel.phase !== 'done' && duel.qi > 0 && !confirm('确定退出？当前对决进度将丢弃')) return;
+    /* r15 体验瑕疵修复：出题态的原生 confirm 阻塞主线程期间 duel.end 按墙钟照走
+       （与战斗页 btn-quit 同类问题）——弹窗里犹豫几秒，取消退出后本题就被白吃几秒，
+       临界时直接判超时。弹窗前记下剩余时长，取消时补回来（接力/暂停态 duel.end=0 不动） */
+    var askConfirm = duel && duel.phase !== 'done' && duel.qi > 0;
+    var qLeft = 0;
+    if (askConfirm && duel.phase === 'q' && duel.q && !duel.q.locked && duel.end > 0) {
+      qLeft = Math.max(0, duel.end - Date.now());
+    }
+    if (askConfirm && !confirm('确定退出？当前对决进度将丢弃')) {
+      if (qLeft > 0) duel.end = Date.now() + qLeft;
+      return;
+    }
     closeDuel();
   };
   // 词境工坊
@@ -5890,8 +6053,19 @@ function bindEvents() {
   };
 
   // 战斗页
+  /* 横幅点按跳过（r15）：关卡/Boss 横幅任意处点击即关闭并继续后续流程 */
+  $('banner').addEventListener('click', hideBanner);
   $('btn-quit').onclick = function () {
-    if (confirm('确定退出本局？本局进度将在结算后记录')) endRun('quit');
+    /* r15 体验瑕疵修复：原生 confirm 阻塞主线程期间 performance.now 照走——
+       玩家在弹窗里犹豫 5 秒，取消退出后本题就白丢 5 秒（临界时直接被超时判负）。
+       弹窗前记录剩余时长，取消时把 deadline 补回来（接力暂停态 timerEnd=0 不动） */
+    var paused = run && run.q && !run.q.locked && timerEnd > 0;
+    var leftMs = paused ? Math.max(0, timerEnd - performance.now()) : 0;
+    if (confirm('确定退出本局？本局进度将在结算后记录')) { endRun('quit'); return; }
+    if (paused) {
+      timerEnd = performance.now() + leftMs;
+      tickLastPct = -1;   /* 取消后下一帧强制重写进度条 */
+    }
   };
   $('btn-replay').onclick = function () { if (run && run.q) TTS.speak(run.q.word.w, true); };
   $('q-prompt').onclick = function () {
