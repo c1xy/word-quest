@@ -58,6 +58,8 @@ function defaultSave() {
     poisonIssued: null,  // 最近一次发出的挑战码内容，用于核对回贴的成绩码
     rogue: { runs: 0, wins: 0, bestChain: 0, cursesSeen: {} },  // 词魂肉鸽档案（出征/加冕/最高连锁/遭遇过的诅咒）
     duel: { plays: 0, p1wins: 0, p2wins: 0 },                   // 双人热座对决战绩（红队/蓝队胜负）
+    srs: {},             // 间隔重复排程（r17）：word -> { st: 档位 0-4, due: 到期时间戳, ok, wrong, t: 最近作答 }
+                         // 档位 新词(0) → 1天(1) → 3天(2) → 7天(3) → 成熟(4)；旧档缺字段自动补空对象（向后兼容）
     firstRun: true       // 新玩家引导条：完成首次冒险通关后置 false 永久隐藏（stageClear）
   };
 }
@@ -77,6 +79,17 @@ function loadSave() {
    冻结主线程、结算 '★'.repeat(-1) 抛 RangeError。这里按白名单逐字段校验类型与
    范围（数值夹取、对象/数组类型检查），脏条目就地修正或丢弃，保证 loadSave 产出
    的存档恒定可玩——坏档降级重置字段而不是白屏/死锁。 */
+/* ---------- 间隔重复（SM-2 lite 简化）档位表 ----------
+   记忆档位：新词(0) → 1 天(1) → 3 天(2) → 7 天(3) → 成熟(4)。
+   SRS_INTERVAL_DAYS[i] = 在档位 i 答对后晋升到下一档、间隔多少天再复习：
+   新词答对 → 明天复习(1)；1 天档答对 → 3 天后；3 天档答对 → 7 天后；
+   7 天档答对 → 晋升「成熟」，此后每 30 天回归一次保持长时记忆（SM-2 lite 简化：
+   固定日阶梯，不再引入易变度因子）。答错一律降一档且立即到期（今日重学）。
+   sanitizeSave 在首次 loadSave 时就会用到 SRS_STAGE_MAX，故常量前置在本节。 */
+var SRS_STAGE_MAX = 4;
+var SRS_INTERVAL_DAYS = [1, 3, 7, 30];
+var SRS_DUE_CAP = 8.64e15;
+
 function numOr(v, dflt, min, max) {
   var n = (typeof v === 'number' && isFinite(v)) ? v : (typeof v === 'string' && v !== '' && isFinite(+v) ? +v : NaN);
   if (isNaN(n)) return dflt;
@@ -283,6 +296,22 @@ function sanitizeSave(src) {
     p1wins: intOr(duS.p1wins, 0, 0, 1e9),
     p2wins: intOr(duS.p2wins, 0, 0, 1e9)
   };
+  /* 间隔重复排程（r17 新增维度）：词条必须为对象，st 夹取 0-4（SRS_STAGE_MAX），
+     due 夹取时间戳量级——脏条目丢弃而不是让排程队列在随机位置引爆。
+     旧档无 srs 字段 → 保持 defaultSave 的空对象，旧玩家首次作答自动入学（向后兼容） */
+  var srS = objOr(s.srs);
+  if (srS) for (k in srS) {
+    if (!ownKey(srS, k)) continue;
+    var sr = objOr(srS[k]);
+    if (!sr) continue;
+    d.srs[k] = {
+      st: intOr(sr.st, 0, 0, SRS_STAGE_MAX),
+      due: intOr(sr.due, 0, 0, SRS_DUE_CAP),
+      ok: intOr(sr.ok, 0, 0, 1e9),
+      wrong: intOr(sr.wrong, 0, 0, 1e9),
+      t: intOr(sr.t, 0, 0, 8.64e15)
+    };
+  }
   return d;
 }
 
@@ -1567,6 +1596,196 @@ function wordFamily(w) {
   return fam;
 }
 
+/* ========================= 词景（emoji 场景联想，r17 新增维度） =========================
+   双通道记忆（语言+图像）：给具象词配 2-3 个 emoji 组成的「词景」小场景。
+   · SCENE_CATS：≥6 类具象词（动物/食物/天气/动作/场所/情绪/自然/人物）的显式
+     映射表——主体元素是词本体的图像，环境元素补出场景感；hook 是该类词的
+     联想提示一句话（记忆画像用）。纯 emoji 组合，零新依赖。
+   · EMOJI_OF 里没有显式映射的词：按释义关键词归类，主体沿用 EMOJI_OF 单 emoji
+     + 类别氛围元素组成 2 元素词景（sceneOf）。
+   · 懒渲染：sceneOf 按需调用 + memo（不预热全库），题面/词详情/结算三词卡各取所需，
+     一次一次词只算一次，不卡帧。 */
+var SCENE_CATS = [
+  { id: 'animal', name: '动物', hook: '把这个词放进它出没的野外一幕',
+    words: { bat: '🦇🌙', insect: '🐛🍃', germ: '🦠🔬', bacteria: '🦠🧫', hawk: '🦅🪶', beast: '🦁🌾',
+      mammal: '🐬🌊', cattle: '🐄🌾', livestock: '🐄🚜', herd: '🐘🌾', prey: '🦎🎯', wing: '🪽🌤️',
+      claw: '🐾🪵', swarm: '🐝🌪️', fossil: '🦴🪨', marsh: '🐸🌾' } },
+  { id: 'food', name: '食物', hook: '想象它出现在餐桌上的一角',
+    words: { snack: '🍬🛋️', beverage: '🥤🧊', cocktail: '🍹🍋', barbecue: '🍖🔥', feast: '🍽️🥂',
+      banquet: '🍽️🏮', cereal: '🌾🥣', grain: '🌾🌾', crop: '🌾🚜', herb: '🌿🍲', appetite: '🍽️😋' } },
+  { id: 'weather', name: '天气', hook: '想象窗外这种天色正在发生',
+    words: { hurricane: '🌪️🌊', blizzard: '❄️🌨️', drought: '🏜️☀️', flood: '🌊🏚️', thunder: '⛈️🌩️',
+      lightning: '⚡🌩️', hail: '🌨️🧊', breeze: '🍃😊', temperature: '🌡️🌤️',
+      climate: '🌦️🌍', tide: '🌊🌙' } },
+  { id: 'action', name: '动作', hook: '在脑海里把动作演一遍',
+    words: { leap: '🏃💨', crawl: '🧎🐜', dive: '🤿🌊', toss: '🤾🏀', grasp: '✊🤏', chop: '🪓🪵',
+      carve: '🗿🔨', construct: '🏗️🏗️', destroy: '💥🧱', repair: '🔧⚙️', mend: '🧵🪡', weave: '🧶🪡',
+      calculate: '🧮✏️', weigh: '⚖️📦', decide: '🤔💭', yell: '🗣️📢', whisper: '🤫💬', sigh: '😮‍💨💭',
+      bite: '😋🍎', chew: '😋🥩', float: '🛟🌊', slide: '🛝💨', slip: '🍌🤸', spin: '🌀🎠',
+      rotate: '🔄⚙️', swing: '🌳🧒', sway: '🌿🍃', tremble: '😰💥', charge: '⚔️🐎', rush: '🏃⏰',
+      wander: '🚶🗺️', roam: '🚶🌾', glance: '👀⚡', grin: '😀🦷', frown: '😠💢', yawn: '🥱😪',
+      shrug: '🤷💬', kneel: '🧎🙏', punch: '👊💥', grip: '✊💪', snatch: '🖐️💨', hurl: '🏋️💨',
+      spill: '🥛💦', splash: '💦🌊', spray: '🚿💨', boil: '♨️🍲', roast: '🍗🔥', slice: '🔪🍞',
+      stir: '🥄☕', whip: '🥣💨', swallow: '😮💧', hammer: '🔨🔩' } },
+  { id: 'place', name: '场所', hook: '把自己放进这个场所走一圈',
+    words: { castle: '🏰🚩', palace: '🏛️👑', tower: '🗼☁️', temple: '🛕🕯️', church: '⛪🕯️',
+      cathedral: '⛪🚪', chapel: '⛪🕯️', monument: '🗿🌸', statue: '🗿🕊️', gallery: '🖼️🎨',
+      tunnel: '🕳️🚇', campus: '🏫🎓', kindergarten: '🧒🧸', nursery: '🍼🧸', suburb: '🏘️🌳',
+      workshop: '🏭🔧', stadium: '🏟️⚽', harbor: '⚓🚢', canal: '🛳️💧', beach: '🏖️⛱️',
+      coast: '🏖️🌊', cliff: '⛰️🐦', canyon: '🏞️🌉', cave: '🕳️🦇', meadow: '🌼🦋', jungle: '🌴🐒',
+      court: '⚖️🏛️', lounge: '🛋️☕', lobby: '🏨🚪', balcony: '🌆🪴', attic: '🪜📦',
+      basement: '🪜🔦', dock: '⚓📦', cabin: '🛖🌲', mansion: '🏡🌳', shed: '🛠️🏚️',
+      orchard: '🍎🌳' } },
+  { id: 'emotion', name: '情绪', hook: '回忆一次这种情绪袭来的瞬间',
+    words: { hatred: '😡💢', sorrow: '😢💧', grief: '😢🥀', terror: '😱💥', panic: '😰💨',
+      misery: '😭🌧️', laughter: '😂🤣', weep: '😭💧', nightmare: '😈🌙', anxiety: '😰🌀',
+      envy: '😒💚', disgust: '🤢👎', affection: '🥰💗', passion: '🔥💗', sympathy: '🤗💗',
+      enthusiasm: '🔥🎉', optimism: '🌅💪', outrage: '😡⚡', content: '😌☕', calm: '🧘💧' } },
+  { id: 'nature', name: '自然', hook: '想象这片自然景象就在眼前',
+    words: { volcano: '🌋🔥', wave: '🌊🏖️', dawn: '🌅🌄', horizon: '🌅🚶',
+      stream: '🏞️💧', peninsula: '🗺️🌊', plateau: '🏔️🌫️', peak: '⛰️❄️', summit: '🚩⛰️',
+      slope: '⛷️📐', glacier: '🧊🏔️', reservoir: '💧🏞️', swamp: '🐊🌿', timber: '🪵🌲',
+      solar: '☀️🔋', lunar: '🌙🔭', planet: '🪐🌌', universe: '🌌✨', galaxy: '🌌🌠' } },
+  { id: 'people', name: '人物', hook: '想象这个人正在做的那件事',
+    words: { emperor: '👑🏯', prince: '🤴🏰', princess: '👸🏰', warrior: '⚔️🛡️', soldier: '🪖🎖️',
+      troop: '🪖🚩', pirate: '🏴‍☠️⚓', thief: '🥷🌙', burglar: '🥷🔐', bandit: '🥷🌵',
+      spy: '🕵️🕶️', dentist: '🦷🪥', physician: '👨‍⚕️🩺', surgeon: '👨‍⚕️🔪', professor: '👨‍🏫📚',
+      engineer: '👨‍🔧📐', mechanic: '🔧🚗', carpenter: '🪚🪵', merchant: '💼📦',
+      chauffeur: '🚕🧑‍✈️', bachelor: '🎓💍', millionaire: '💰🏦', infant: '👶🍼',
+      bride: '👰💍', guardian: '🛡️🧒', monarch: '👑🏛️', aristocrat: '🎩🥂' } }
+];
+/* 显式映射之外的 EMOJI_OF 词按释义关键词归类，补一枚氛围元素成 2 元素词景 */
+var SCENE_MEAN_MATCH = [
+  ['animal', /兽|鸟|鱼|虫|象|狮|虎|牛|羊|马|狗|猫|鲸|鲨|豚|蛙|蛇|鹿|兔|鼠|蜂|蝶|蚁|鹰|鸦|鸽|鸡|鸭|猪|狼|狐|熊|蟹|虾|贝|昆虫|哺乳|牲畜|野兽|兽群|翅膀|爪|巢|猎物|蝙蝠/],
+  ['food', /食物|饭|餐|菜|肉|面包|米|面|糖|果|蔬|饮|茶|咖啡|酒|奶|油|盐|粮|零食|膳|谷|宴|烧烤|胃口|食欲|药剂|维生素|疫苗|药物|剂量|胶囊|毒药/],
+  ['weather', /天气|气候|雨|雪|风|雷|电|雾|霜|冰|晴|云|虹|风暴|洪水|干旱|潮汐|波浪|温度|太阳|月亮|黎明|地平线/],
+  ['emotion', /情绪|感情|高兴|快乐|悲伤|愤怒|害怕|恐惧|惊慌|喜|忧|焦虑|兴奋|满意|骄傲|羞|嫉妒|羡慕|孤独|绝望|乐观|紧张|放松|平静|热情|冷漠|憎恨|悲痛|恐慌|痛苦|笑|哭|噩梦|同情|厌恶|喜爱|满足|智慧|记忆|回忆/],
+  ['place', /场所|馆|厅|房|室|院|园|场|店|站|校|教堂|宫殿|城堡|塔|桥|街|市|村|镇|监狱|医院|银行|旅馆|剧院|博物馆|图书馆|工厂|农场|庙|廊|郊区|宿舍|地下室|阳台|阁楼|码头|船舱|宅邸|小屋|棚|法院|校园|城市|家庭/],
+  ['nature', /自然|星空|宇宙|行星|银河|宇宙的|月球的|丛|林|木|花|草|根|茎|芽|农业|庄稼|木材|运河|小溪/],
+  ['people', /人$|者|师|家|员|士|官|王|后|子|匠|商|医|徒|犯|敌|友|伴|侣|童|婴儿|青少年|皇帝|王子|公主|战士|士兵|部队|海盗|小偷|夜贼|强盗|间谍|律师|陪审|教授|工程师|技工|木匠|司机|学士|百万富翁|新娘|双胞胎|同伴|伙伴|同志|贵族|君主|监护人|人质/],
+  ['action', /^v\./]
+];
+var SCENE_AMBIENT = {
+  animal: ['🌿', '🌾', '🌳', '🏞️'], food: ['🍽️', '🥢', '🧺'], weather: ['☁️', '🌤️', '🌈'],
+  action: ['💨', '✨'], place: ['🚪', '🕯️', '🪑'], emotion: ['💭', '💫'],
+  nature: ['🏞️', '✨'], people: ['💬', '🚶'], object: ['✨', '💡']
+};
+var sceneMemo = {};
+function sceneCatOf(w, mean) {
+  for (var i = 0; i < SCENE_CATS.length; i++) {
+    if (SCENE_CATS[i].words[w]) return SCENE_CATS[i];
+  }
+  var m = mean || MEANING_OF[w] || '';
+  for (var j = 0; j < SCENE_MEAN_MATCH.length; j++) {
+    if (SCENE_MEAN_MATCH[j][1].test(m)) return { id: SCENE_MEAN_MATCH[j][0], name: '', words: {}, hook: '' };
+  }
+  return null;
+}
+/* 词景：2-3 个 emoji 组合（显式映射优先；EMOJI_OF 词按类补氛围元素）。无景返回 '' */
+function sceneOf(w) {
+  if (w in sceneMemo) return sceneMemo[w];
+  var out = '';
+  for (var i = 0; i < SCENE_CATS.length; i++) {
+    if (SCENE_CATS[i].words[w]) { out = SCENE_CATS[i].words[w]; break; }
+  }
+  if (!out && typeof EMOJI_OF !== 'undefined' && EMOJI_OF[w]) {
+    var cat = sceneCatOf(w);
+    var amb = (SCENE_AMBIENT[cat && cat.id] || SCENE_AMBIENT.object);
+    out = EMOJI_OF[w] + amb[hashStr(w) % amb.length];
+  }
+  sceneMemo[w] = out;
+  return out;
+}
+function sceneHookOf(w) {
+  var cat = sceneCatOf(w);
+  return (cat && cat.hook) || '';
+}
+
+/* ---------- 简易音节拆分（无词根词的记忆画像兜底） ----------
+   元音组（含元音字母组合 aa-uy）按「最大 onset 原则」切分：组间辅音簇尽量划给
+   下一音节，但下一音节开头必须是英语合法 onset（辅音簇白名单），否则回退少留一个。
+   结尾「辅音+e」且 e 独立成组时按不发音并入前一音节（make/house 判回单音节）。
+   拆分覆盖全部字母、近似即可——展示时标注「约」。 */
+var SYL_ONSETS = ['bl', 'br', 'cl', 'cr', 'dr', 'fl', 'fr', 'gl', 'gr', 'pl', 'pr', 'sc', 'sk', 'sl',
+  'sm', 'sn', 'sp', 'st', 'tr', 'tw', 'sw', 'ch', 'sh', 'th', 'ph', 'wh', 'ck', 'qu', 'str', 'spr',
+  'scr', 'spl', 'shr', 'thr', 'squ', 'sch', 'gn', 'kn', 'wr', 'dw'];
+function sylLegalOnset(c) {
+  if (c.length <= 1) return true;
+  return SYL_ONSETS.indexOf(c) >= 0;
+}
+/* y 的元音性：词首、或紧邻其它元音字母时是半元音/辅音（yes/beyond/royal），
+   其余（词尾、辅音之间）是元音（study/deny/happy） */
+function sylIsVowelAt(s, i) {
+  var c = s[i];
+  if ('aeiou'.indexOf(c) >= 0) return true;
+  if (c !== 'y' || i === 0) return false;
+  var prevV = i > 0 && 'aeiou'.indexOf(s[i - 1]) >= 0;
+  var nextV = i + 1 < s.length && 'aeiou'.indexOf(s[i + 1]) >= 0;
+  return !prevV && !nextV;
+}
+function syllablesOf(w) {
+  var s = String(w || '').toLowerCase();
+  if (!/^[a-z]{3,}$/.test(s)) return '';
+  var groups = [], i = 0;
+  while (i < s.length) {
+    if (sylIsVowelAt(s, i)) {
+      var j = i;
+      while (j < s.length && sylIsVowelAt(s, j)) j++;
+      groups.push([i, j]);
+      i = j;
+    } else i++;
+  }
+  /* 相邻元音组合并（ea/oo/ai/ue/ua… 双元音字母算一个韵腹；合并后总长 ≤2，避免 eyo 连环并） */
+  var merged = [];
+  for (var g = 0; g < groups.length; g++) {
+    var mg = merged[merged.length - 1];
+    if (merged.length && mg[1] === groups[g][0] && groups[g][1] - groups[g][0] === 1 &&
+        groups[g][1] - mg[0] <= 2) {
+      mg[1] = groups[g][1];
+    } else merged.push(groups[g].slice());
+  }
+  /* 结尾不发音 e：独立成组的结尾 e 且前面只隔一个辅音 → 并回前一音节（覆盖显示不丢字母） */
+  var last = merged[merged.length - 1];
+  if (merged.length >= 2 && last[1] === s.length && last[1] - last[0] === 1 && s[last[0]] === 'e') {
+    var gapL = last[0] - merged[merged.length - 2][1];
+    if (gapL === 1) {
+      merged[merged.length - 2][1] = last[1];
+      merged.pop();
+    }
+  }
+  if (merged.length < 2) return '';   /* 单音节无需拆 */
+  var cuts = [];
+  for (var g2 = 0; g2 < merged.length - 1; g2++) {
+    var gs = merged[g2][1], ge = merged[g2 + 1][0];
+    /* 最长合法 onset 优先：从簇首向后试，第一个合法前缀即 onset（单辅音恒合法，必有解） */
+    var k = gs, onsetLen = 1;
+    while (k < ge) {
+      if (sylLegalOnset(s.slice(k, ge))) { onsetLen = ge - k; break; }
+      k++;
+    }
+    cuts.push(Math.max(gs, ge - onsetLen));
+  }
+  var parts = [], prev = 0;
+  cuts.forEach(function (c) { parts.push(s.slice(prev, c)); prev = c; });
+  parts.push(s.slice(prev));
+  return parts.join('·');
+}
+
+/* ---------- 例句填空（记忆画像）：按词性套模板挖空目标词 ----------
+   零语料依赖：模板给出语法框架，空位留给目标词，配首字母提示展开与揭晓。 */
+var CLOZE_TPL = {
+  v: ['We decided to ____ before it was too late.', 'Can you ____ this for me?', 'She managed to ____ in the end.', 'They plan to ____ every morning.'],
+  n: ['The report mentioned the ____ in detail.', 'He wrote the ____ in his notebook.', 'Have you ever seen a ____ like this?', 'There was a ____ near the old house.'],
+  adj: ['The result was quite ____.', 'Everyone felt ____ about it.', 'It may sound ____, but it works.'],
+  adv: ['She finished the work ____.', 'He answered the question ____ .'],
+  any: ['Try to use “____” in a sentence of your own.']
+};
+function clozeOf(w) {
+  var pos = posOf(MEANING_OF[w] || '');
+  var bank = CLOZE_TPL[pos] || CLOZE_TPL.any;
+  return bank[hashStr(w) % bank.length];
+}
+
 /* ========================= 每日学习计划 ========================= */
 function dateKey(d) {
   var x = d || new Date();
@@ -2237,6 +2456,14 @@ function comboBurst() {
   if (run.mode === 'adventure' || run.mode === 'endless' || run.mode === 'expedition') addPressure(-8);
   Sfx.levelup();
   fx('⚡ 勇者爆发！+' + bonus + '🪙 生命+2', 'good', 50, 16);
+  /* 连击里程碑（5/10/15…）fx 显示所连单词串（r17）：词汇-成功关联强化——
+     streak 太长时展示最近的 5 个，前面以 … 截断 */
+  var cw = run.comboWords || [];
+  if (cw.length) {
+    var chain = cw.slice(-5).join(' · ');
+    if (cw.length > 5) chain = '… ' + chain;
+    fx('🔗 ' + run.combo + ' 连击：' + chain, 'combo-chain', 50, 10);
+  }
   /* 全屏金色冲击波从战场中心扩散 */
   var d = document.createElement('div');
   d.className = 'fx-ring gold center-burst';
@@ -2271,6 +2498,9 @@ function updateMastery(w, ok, retried) {
     m.due = Date.now();
     m.wrongStreak = (m.wrongStreak || 0) + 1;
   }
+  /* 间隔重复排程（r17）：生词/错题按记忆档位排程——所有模式的作答统一走这里，
+     与掌握度共用同一条判定链，进度完全互通 */
+  srsReview(w, ok);
 }
 function bumpToday() {
   var st = save.streak;
@@ -2281,6 +2511,77 @@ function bumpToday() {
     st.last = today; st.todayCount = 0;
   }
   st.todayCount++;
+}
+
+/* ========================= 间隔重复排程（SM-2 lite 简化，r17 新增维度） =========================
+   单词可记忆性的首位杠杆：生词/错题按记忆档位 新词→1天→3天→7天→成熟 排程。
+   · srsReview(w, ok)：作答写档的唯一入口（updateMastery 统一调用，全模式互通）——
+     答对晋升一档并按日阶梯排下次到期；答错降档且立即到期（今日重学）。
+   · srsDueList()/srsCountToday()：主页「今日待复习」入口与复习会话词队列。
+     「今日」边界 = 今天 23:59:59.999（明天才到期的词不进今天的仪式）。
+   · 落盘：与 persist() 防抖合并，每答一题最多一次 stringify。 */
+var SRS_SESSION_MAX = 20;   /* 单次复习会话词量上限（最逾期的优先） */
+var SRS_TIERS = ['新词', '1 天', '3 天', '7 天', '成熟'];
+function srsTierName(st) {
+  return SRS_TIERS[Math.max(0, Math.min(SRS_STAGE_MAX, st | 0))];
+}
+function srsGet(w) {
+  if (!save.srs || typeof save.srs !== 'object') save.srs = {};   /* 旧档/直改档保险 */
+  return save.srs[w] || (save.srs[w] = { st: 0, due: 0, ok: 0, wrong: 0, t: 0 });
+}
+function srsReview(w, ok) {
+  var e = srsGet(w);
+  var pre = e.st | 0;
+  if (ok) {
+    /* 答对晋升：新词→1天→3天→7天→成熟；成熟档答对维持成熟（SM-2 lite 固定 30 天回归） */
+    e.st = Math.min(SRS_STAGE_MAX, pre + 1);
+    e.ok = (e.ok || 0) + 1;
+    e.due = Date.now() + SRS_INTERVAL_DAYS[Math.min(pre, SRS_STAGE_MAX - 1)] * 864e5;
+  } else {
+    /* 答错降档：退一档（新词维持新词），并立即到期——错题当天进复习队列 */
+    e.st = Math.max(0, pre - 1);
+    e.wrong = (e.wrong || 0) + 1;
+    e.due = Date.now();
+  }
+  e.t = Date.now();
+  persist();
+}
+function srsEndOfToday() {
+  var d = new Date();
+  d.setHours(23, 59, 59, 999);
+  return d.getTime();
+}
+/* 今日待复习队列：due ≤ 今天结束 的词按最逾期优先排序，单次会话截取前 SRS_SESSION_MAX 个。
+   释义经 meaningOfAny 取值——自定义词库的词（不在 MEANING_OF）也能进队列 */
+function srsDueList() {
+  var bound = srsEndOfToday(), out = [];
+  var srsMap = save.srs || {};
+  for (var w in srsMap) {
+    if (!ownKey(srsMap, w)) continue;
+    var e = srsMap[w];
+    if (!e || typeof e !== 'object') continue;
+    var mm = meaningOfAny(w);
+    /* 注意不能写 (e.due | 0)：时间戳 > 2^31，按位或会溢出成负数把全部到期词滤掉 */
+    if (e.due > 0 && e.due <= bound && mm) out.push({ w: w, m: mm, st: e.st | 0, due: e.due });
+  }
+  out.sort(function (a, b) { return a.due - b.due || (a.w < b.w ? -1 : 1); });
+  return out;
+}
+function srsCountToday() {
+  return srsDueList().length;
+}
+/* 发起今日复习：无到期词时明确空态文案（返回 false，不空开一局） */
+function startSrsReview() {
+  var queue = srsDueList();
+  if (!queue.length) {
+    toast('☀️ 今天没有到期待复习的单词——档位排程都在正轨上，去学几个新词吧！');
+    return false;
+  }
+  var n = Math.min(queue.length, SRS_SESSION_MAX);
+  var extra = queue.length > n ? '（今日到期 ' + queue.length + ' 词，本次先复习最逾期的 ' + n + ' 词）' : '';
+  startRun('srs', (save.lastLists || ['cet4']).filter(function (id) { return !!listById(id); }), 'normal',
+    queue.slice(0, n).map(function (x) { return { w: x.w, m: x.m }; }), null, extra);
+  return true;
 }
 
 /* ========================= 词池 ========================= */
@@ -2667,7 +2968,7 @@ function expTodayCleared() {
 
 /* 加权选词：低掌握 / 没见过 / 到期该复习的优先 */
 function pickWord() {
-  if (run.mode === 'plan' && run.planQueue && run.planQueue.length) {
+  if ((run.mode === 'plan' || run.mode === 'srs') && run.planQueue && run.planQueue.length) {
     return run.planQueue.shift();
   }
   for (var i = 0; i < run.reinforce.length; i++) {
@@ -2852,16 +3153,16 @@ function hasMod(id) {
   return activeMods().indexOf(id) >= 0;
 }
 
-function startRun(mode, listIds, diffKey, explicitPool, rogueCfg) {
+function startRun(mode, listIds, diffKey, explicitPool, rogueCfg, bannerExtra) {
   /* 出战入口兜底：清空/重建期间任何一行抛异常都不允许停在「无题无怪无横幅」的
      半渲染战斗页——回主页并提示（存档已由 persistNow 保住） */
-  try { startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg); }
+  try { startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg, bannerExtra); }
   catch (e) { noteError('startRun', e); goHomeSafe(); }
 }
-function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
+function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg, bannerExtra) {
   if (!buildEnc()) { showLoadFail(); return; }   /* 词库未加载：出不了题，给可恢复提示 */
   var diff = DIFFS[diffKey] || DIFFS.normal;
-  var unitCtx = (rogueCfg || mode === 'review' || mode === 'drill' || mode === 'expedition' || mode === 'dictation') ? null : resolveUnitCtx(listIds);
+  var unitCtx = (rogueCfg || mode === 'review' || mode === 'srs' || mode === 'drill' || mode === 'expedition' || mode === 'dictation') ? null : resolveUnitCtx(listIds);
   var pool;
   if (explicitPool) pool = explicitPool.slice();
   else if (mode === 'review' || mode === 'drill' || mode === 'dictation') pool = buildReviewPool(listIds);
@@ -2873,13 +3174,14 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
     mode: mode, listIds: listIds, diff: diff, diffKey: diffKey,
     pool: pool, stage: 1, stageSize: 6, killedInStage: 0, stageBonus: 0, bossStage: false, bossMod: '',
     kills: 0, answered: 0, correct: 0, combo: 0, maxCombo: 0,
+    comboWords: [],   /* 当前连击串（r17）：连击 5/10/15 里程碑 fx 显示所连单词串 */
     hp: maxHp, maxHp: maxHp, shields: save.upgrades.shield || 0, hints: talentLv('sage'), hgStack: 0,
     coinsEarned: 0, reinforce: [], recent: [], records: [], recordsBy: {},
     monster: null, q: null, pendingRevenge: false, reviewTotal: 12,
     pet: save.pet || '', timerAdj: 0, hist: [], wrongTotal: 0, timeline: [],
     speakTotal: 0, speakPass: 0, speakErrStreak: 0, speakDisabled: false,   /* 听写·口语跟读统计 */
     willUsed: false, smiteN: 0, packId: '', expMods: null, expScore: 0,
-    planQueue: (mode === 'plan') ? pool.slice() : null,
+    planQueue: (mode === 'plan' || mode === 'srs') ? pool.slice() : null,
     unitCtx: unitCtx || null, unitSet: null,
     pressure: 0
   };
@@ -2898,6 +3200,8 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
   }
   if (mode === 'plan') {
     run.reviewTotal = pool.length;
+  } else if (mode === 'srs') {
+    run.reviewTotal = pool.length;   /* 今日待复习：词队列=到期词，一词一怪打完整队列 */
   } else if (mode === 'review' || mode === 'drill' || mode === 'dictation') {
     /* 普通复习/强化/听写按"本局词量"取题；小词池对决每词来两遍 */
     run.reviewTotal = explicitPool
@@ -2921,6 +3225,8 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
   $('q-speak').innerHTML = '';
   $('q-memo').hidden = true;
   $('q-memo').innerHTML = '';
+  $('q-scene').hidden = true;
+  $('q-scene').textContent = '';
   $('btn-replay').hidden = true;
   $('btn-hint').hidden = true;
   $('btn-memo').hidden = true;
@@ -2948,8 +3254,9 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
     : (mode === 'dictation' ? '🎧' : '🧙‍♂️');
   $('hero-hp-text').textContent = (mode === 'review') ? '📖 练习模式 · 不扣血'
     : (mode === 'plan' ? '🎯 今日计划 · 不扣血'
+    : (mode === 'srs' ? '🧠 今日待复习 · 不扣血'
     : (mode === 'drill' ? '🔥 强化训练 · 不扣血'
-    : (mode === 'dictation' ? '🎧 听写挑战 · 不扣血' : '🏰 城防 100%')));
+    : (mode === 'dictation' ? '🎧 听写挑战 · 不扣血' : '🏰 城防 100%'))));
   updateHUD();
   BGM.stop();
   BGM.start('normal');
@@ -2957,6 +3264,11 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg) {
   if (mode === 'review') {
     applyTheme(0);
     showBanner('📖 复习开始！', '共 ' + run.reviewTotal + ' 只单词怪，不扣血放心练', function () { nextMonster(); }, 1500);
+  } else if (mode === 'srs') {
+    /* 间隔重复复习会话（r17）：答对晋升档位，答错降档——排程写回 save.srs 并落盘 */
+    applyTheme(0);
+    showBanner('🧠 今日待复习', '共 ' + run.reviewTotal + ' 词 · 答对晋升 / 答错降档 · 不扣血' + (bannerExtra ? '<br>' + bannerExtra : ''),
+      function () { nextMonster(); }, 1800);
   } else if (mode === 'drill') {
     applyTheme(0);
     showBanner('🔥 错题强化训练', '专攻错题本 ' + run.reviewTotal + ' 题 · 不扣血', function () { nextMonster(); }, 1600);
@@ -3188,6 +3500,22 @@ function renderQuestion() {
   if (!memo.code && !memo.fam.length) body = '<div class="memo-code">🖼️ 图像联想记忆</div>';
   memoHtml += '<span class="memo-body">' + body + '</span>';
   $('q-memo').innerHTML = memoHtml;
+
+  /* 词景（r17）：题面自动展示 2-3 元素 emoji 场景——但只在词面/词音已暴露的题型
+     （看英选中/听音/跟读/听写）出现；c2e 与拼写题的词是答案，场景会泄题，
+     保持隐藏（要看图像走 🔍 记忆提示按钮，玩家主动 opting in）。
+     沉默词缀 🔕 封印一切记忆提示——词景同属提示通道，一并封印。 */
+  var sceneEl = $('q-scene');
+  var sceneVisible = !silenced && (q.type === 'e2c' || q.type === 'listen' ||
+    (run.mode === 'dictation' && (TTS.ok || speakPhaseOn(q))));
+  if (sceneVisible) {
+    var sc = sceneOf(q.word.w);
+    if (sc) {
+      sceneEl.textContent = sc;
+      sceneEl.title = '词景联想';   /* 不含词面：听音题 hover 提示不得泄露答案拼写 */
+      sceneEl.hidden = false;
+    } else sceneEl.hidden = true;
+  } else sceneEl.hidden = true;
 
   var prompt = $('q-prompt');
   prompt.className = 'q-prompt';
@@ -3701,6 +4029,7 @@ function resolveCore(ok, timedOut) {
   if (ok) {
     run.correct++;
     run.combo++;
+    run.comboWords.push(word.w);   /* 连击串：里程碑 fx 展示「这些词连在一起」 */
     if (hasMod('curse') && run.combo > 3) run.combo = 3;   /* 诅咒词缀：连击封顶 3 连 */
     run.maxCombo = Math.max(run.maxCombo, run.combo);
     rec.ok++;
@@ -3791,6 +4120,7 @@ function resolveCore(ok, timedOut) {
   } else {
     var lostCombo = run.combo;   /* r15：连击被打断——≥3 连断掉给一记明确反馈 */
     run.combo = 0;
+    run.comboWords = [];
     run.wrongTotal++;
     rec.wrong++;
     run.timeline.push({ ok: 0, combo: 0 });   /* 结算页节奏图数据 */
@@ -3867,7 +4197,7 @@ function heroAttackFx(dmgText, coinGain, crit) {
 
 function monsterAttack(cb) {
   var atkSeq0 = runEpoch;
-  if (run.mode === 'review' || run.mode === 'plan' || run.mode === 'drill') {
+  if (run.mode === 'review' || run.mode === 'srs' || run.mode === 'plan' || run.mode === 'drill') {
     setTimeout(safe(function () { if (!run || run.ended || runEpoch !== atkSeq0) return; cb(); }, 'atk-review'), 250);
     return;
   }
@@ -3959,7 +4289,7 @@ function killMonster() {
   var killSeq = runEpoch;
   setTimeout(safe(function () {
     if (!run || run.ended || runEpoch !== killSeq) return;
-    if (run.mode === 'review' || run.mode === 'plan' || run.mode === 'drill' || run.mode === 'dictation') {
+    if (run.mode === 'review' || run.mode === 'srs' || run.mode === 'plan' || run.mode === 'drill' || run.mode === 'dictation') {
       if (run.mode === 'plan') { ensurePlanDay(); save.planDay.done = run.kills; persist(); }
       if (run.kills >= run.reviewTotal) { endRun('done'); return; }
       nextMonster();
@@ -4208,7 +4538,7 @@ function endRunCore(reason) {
        此处兜底「已进第 2 关（必经通关）后的非撤退结局」，第 1 关未通关非撤退结束不计 */
     if (run.packId && run.stage >= 2 && reason !== 'quit') markPackDone();
     if (reason === 'done') addXp(10);
-    if (run.mode === 'review' || run.mode === 'drill') bumpTask('review_done');
+    if (run.mode === 'review' || run.mode === 'srs' || run.mode === 'drill') bumpTask('review_done');
     if (run.answered >= 10 && run.wrongTotal === 0) save.stats.perfects++;
     /* 每日远征：积分入档 + 当日首通奖励（积分=击杀×10+答对×2+最高连击×5+通关100） */
     if (run.mode === 'expedition') {
@@ -4250,6 +4580,8 @@ function endRunCore(reason) {
     }
     checkAch();
     if (run.mode === 'drill' && reason === 'done') titles.done = '🔥 强化训练完成！';
+    if (run.mode === 'srs' && reason === 'done') titles.done = '🧠 今日待复习完成！';
+    if (run.mode === 'srs' && reason === 'quit') titles.quit = '🏳️ 复习暂停 · 未复习词仍会留在队列';
     if (run.mode === 'review' && reason === 'quit') titles.quit = '🏳️ 复习中途退出';   /* 与听写撤退同节奏（复习无城防，「撤退整顿」是战斗文案） */
     if (run.mode === 'dictation' && reason === 'done') titles.done = '🎧 听写挑战完成！';
     if (run.mode === 'dictation' && reason === 'quit') titles.quit = '🏳️ 听写中途退出';
@@ -4306,6 +4638,16 @@ function endRunCore(reason) {
       '📈 今日最高 ' + ((save.expedition && save.expedition.date === expDayStamp()) ? save.expedition.best : 0));
     if (run.realm) stats.push('🌌 词境 ' + run.kills + '/' + run.stageSize + ' 词');
     if (run.mode === 'review') stats.push('📖 复习 ' + run.kills + ' 词');
+    if (run.mode === 'srs') {
+      stats.push('🧠 复习 ' + run.kills + ' 词');
+      var srsUp = 0, srsDown = 0;
+      run.records.forEach(function (r0) {
+        var e0 = (save.srs || {})[r0.w];
+        if (!e0) return;
+        if (r0.wrong === 0) srsUp++; else srsDown++;
+      });
+      stats.push('⬆️ 晋升 ' + srsUp + ' 词', '⬇️ 降档 ' + srsDown + ' 词');
+    }
     if (run.mode === 'dictation') stats.push('🎧 听写 ' + run.kills + ' 词');
     if (run.speakTotal > 0) stats.push('🎤 跟读 ' + run.speakPass + '/' + run.speakTotal);
     if (run.mode === 'drill') stats.push('🔥 强化 ' + run.kills + ' 词');
@@ -4330,6 +4672,33 @@ function endRunCore(reason) {
     try { $('result-words').innerHTML = '<p class="hint">战报渲染失败，本局记录已保存</p>'; } catch (x) {}
     try { $('btn-retry-wrong').hidden = true; } catch (x) {}
   }
+
+  /* 本次最该记住的 3 词（r17）：错词优先（错得多靠前），不足 3 个补低正确率词
+     （同一词反复答对又答错也算薄弱）；全对局隐藏卡片。点击任一词打开记忆画像。 */
+  try {
+    var mem3 = run.records.map(function (r) {
+      var total = r.ok + r.wrong;
+      return { w: r.w, m: r.m, wrong: r.wrong, acc: total ? r.ok / total : 1 };
+    }).filter(function (r) { return r.wrong > 0 || r.acc < 1; })
+      .sort(function (a, b) { return (b.wrong - a.wrong) || (a.acc - b.acc); })
+      .slice(0, 3);
+    var card = $('mem3-card'), list = $('mem3-list');
+    if (mem3.length) {
+      list.innerHTML = mem3.map(function (r) {
+        var scene = sceneOf(r.w);
+        var why = r.wrong > 0 ? ('❌ 答错 ' + r.wrong + ' 次') : ('⚠️ 正确率 ' + Math.round(r.acc * 100) + '%');
+        return '<button class="mem3-row" data-w="' + r.w + '" aria-label="查看 ' + r.w + ' 记忆画像">' +
+          '<span class="mem3-scene" aria-hidden="true">' + (scene || '📝') + '</span>' +
+          '<span class="mem3-word">' + r.w + '</span>' +
+          '<span class="mem3-mean">' + r.m + '</span>' +
+          '<span class="mem3-why">' + why + '</span></button>';
+      }).join('');
+      card.hidden = false;
+    } else {
+      card.hidden = true;
+      list.innerHTML = '';
+    }
+  } catch (e) { try { $('mem3-card').hidden = true; } catch (x) {} }
 
   try {
     /* 噩梦关卡结算：记录「我闯的毒」战绩，并备好成绩码 */
@@ -4799,6 +5168,14 @@ function refreshHome() {
       : (sameDay && save.expedition.best > 0 ? '今日最高 ' + save.expedition.best + ' 分 · 再冲一波'
       : '每日固定关卡 · 全员同题');
   }
+  /* 今日待复习入口（r17 间隔重复）：到期数直接写在按钮上，无到期给明确空态文案 */
+  var srsSub = $('srs-sub');
+  if (srsSub) {
+    var dueN = srsCountToday();
+    srsSub.textContent = dueN > 0
+      ? ('今日到期 ' + dueN + ' 词 · 答对晋升 / 答错降档' + (dueN > SRS_SESSION_MAX ? ' · 本次先复习 ' + SRS_SESSION_MAX + ' 词' : ''))
+      : '今日没有到期词 · 档位排程正轨，学新词吧';
+  }
   renderDaily();
   renderPlan();
   persist();
@@ -5045,9 +5422,8 @@ function openWordDetail(w) {
   var wEmoji = (typeof EMOJI_OF !== 'undefined' && EMOJI_OF[w]) ? EMOJI_OF[w] + ' ' : '';
   $('wo-word').textContent = wEmoji + w;
   $('wo-meaning').textContent = mean;
-  var code = wordCode(w);
-  $('wo-code').textContent = code ? '🔑 词汇密码：' + code : '';
-  $('wo-code').hidden = !code;
+  /* 词汇密码行已并入下方「记忆画像」的拆解行（同一数据重复展示，r17 自查修复） */
+  $('wo-code').hidden = true;
   var fam = wordFamily(w);
   var famEl = $('wo-family');
   if (fam.length) {
@@ -5058,6 +5434,7 @@ function openWordDetail(w) {
     famEl.innerHTML = html;
     famEl.hidden = false;
   } else famEl.hidden = true;
+  renderWordProfile(w, mean);
   var m = save.mastery[w];
   var stats = [];
   if (m) {
@@ -5066,6 +5443,8 @@ function openWordDetail(w) {
     stats.push('✅ 答对 ' + m.ok);
     stats.push('❌ 答错 ' + m.wrong);
     stats.push('⏰ 下次复习 ' + humanizeDue(m.due - Date.now()));
+    var se = (save.srs || {})[w];
+    if (se) stats.push('🧠 记忆档位 ' + srsTierName(se.st) + (se.due <= Date.now() ? ' · 已到期' : ''));
   } else {
     stats.push('⬜ 还没学过这个词');
   }
@@ -5079,6 +5458,66 @@ function openWordDetail(w) {
 function closeWordOverlay() {
   $('word-overlay').hidden = true;
   overlayFocusBack();
+}
+
+/* ========================= 记忆画像（词详情弹层，r17 新增维度） =========================
+   三行结构：① 词根/词缀拆解（复用词汇密码 parseCode，无词根词 fallback 简易音节拆分）
+   ② 联想提示一行（词景 emoji + 该类词的联想钩子短语；无词景时退回拆解/音节节奏提示）
+   ③ 例句填空：按词性模板挖空目标词，首字母提示可展开（aria-expanded），再点揭晓答案。
+   全部按需渲染（openWordDetail 时现算），emoji/CSS 组合零依赖不卡帧。 */
+function renderWordProfile(w, mean) {
+  var box = $('wo-profile');
+  var rows = [];
+  /* ① 拆解行：词根优先，无词根词走音节拆分兜底 */
+  var code = wordCode(w);
+  var syl = syllablesOf(w);
+  if (code) rows.push('<div class="wp-row"><span class="wp-tag">🧩 拆解</span><span class="wp-val">' + code + '</span></div>');
+  else if (syl) rows.push('<div class="wp-row"><span class="wp-tag">🎵 音节（约）</span><span class="wp-val">' + syl + '</span></div>');
+  /* ② 联想行：词景 + 联想钩子；无词景给拆解/节奏回退 */
+  var scene = sceneOf(w);
+  var hook = sceneHookOf(w);
+  var assoc;
+  if (scene) assoc = scene + ' ' + (hook || '把画面记进这个词里');
+  else if (code) assoc = '按「' + code.replace(/\([^)]*\)/g, '') + '」的零件逐块拼出画面';
+  else if (syl) assoc = '按 ' + syl + ' 的节奏读三遍，让声音绑定画面';
+  else assoc = '闭上眼把「' + (mean || w) + '」想象成一个画面';
+  rows.push('<div class="wp-row"><span class="wp-tag">💡 联想</span><span class="wp-val">' + assoc + '</span></div>');
+  /* ③ 例句填空：挖空目标词 + 可展开首字母提示 + 揭晓 */
+  var cloze = clozeOf(w);
+  rows.push(
+    '<div class="wp-row wp-cloze"><span class="wp-tag">✍️ 例句</span><span class="wp-val">' + cloze + '</span></div>' +
+    '<div class="wp-cloze-tools">' +
+      '<button class="btn btn-tiny" id="wo-cloze-hint" aria-expanded="false">🔍 首字母提示</button>' +
+      '<button class="btn btn-tiny" id="wo-cloze-reveal">👀 揭晓</button>' +
+      '<span class="cloze-hint" id="wo-cloze-hinttext" hidden></span>' +
+    '</div>');
+  box.innerHTML = rows.join('');
+  box.hidden = false;
+  /* 提示/揭晓按钮：每次 openWordDetail 重新渲染并重新接线（innerHTML 覆盖旧节点） */
+  var hintBtn = $('wo-cloze-hint'), revealBtn = $('wo-cloze-reveal'), hintText = $('wo-cloze-hinttext');
+  hintBtn.onclick = function () {
+    var open = hintBtn.getAttribute('aria-expanded') === 'true';
+    if (open) {
+      hintText.hidden = true;
+      hintBtn.setAttribute('aria-expanded', 'false');
+      hintBtn.textContent = '🔍 首字母提示';
+    } else {
+      hintText.textContent = '首字母 ' + w.charAt(0).toUpperCase() + ' · 共 ' + w.length + ' 个字母';
+      hintText.hidden = false;
+      hintBtn.setAttribute('aria-expanded', 'true');
+      hintBtn.textContent = '🔍 收起提示';
+    }
+  };
+  revealBtn.onclick = function () {
+    var clozeRow = box.querySelector('.wp-cloze .wp-val');
+    if (clozeRow) {
+      clozeRow.textContent = clozeOf(w).replace('____', w);
+      clozeRow.classList.add('cloze-done');
+    }
+    hintText.textContent = w + ' — ' + (mean || '');
+    hintText.hidden = false;
+    revealBtn.disabled = true;
+  };
 }
 
 function renderCustomLists() {
@@ -5952,6 +6391,7 @@ function bindEvents() {
   $('btn-guide').onclick = function () { openSetup('adventure'); };   /* 引导条 → 主线冒险 */
   $('btn-endless').onclick = function () { openSetup('endless'); };
   $('btn-review').onclick = function () { openSetup('review'); };
+  $('btn-srs-review').onclick = startSrsReview;   /* r17：今日待复习（间隔重复排程入口） */
   $('btn-expedition').onclick = function () { openSetup('expedition'); };
   $('btn-dict').onclick = function () { openSetup('dictation'); };
   $('btn-codex').onclick = openCodex;
@@ -6137,6 +6577,7 @@ function bindEvents() {
     if (run.mode === 'review') openSetup('review');
     else if (run.mode === 'dictation') openSetup('dictation');
     else if (run.mode === 'plan') { showScreen('scr-home'); refreshHome(); }
+    else if (run.mode === 'srs') { showScreen('scr-home'); refreshHome(); }   /* 队列由排程决定：回主页看剩余到期数再进 */
     else if (run.mode === 'drill') { openWrongBook(); }
     else if (run.realm) startRealmBattle(run.realm);
     else if (run.poison) startNightmare(run.poison.data);
@@ -6149,6 +6590,11 @@ function bindEvents() {
   $('btn-result-code').onclick = doResultExport;
   $('btn-share-card').onclick = openShareCardForResult;
   $('btn-result-home').onclick = function () { showScreen('scr-home'); refreshHome(); };
+  /* 本次最该记住的 3 词：点击直达该词的记忆画像 */
+  $('mem3-list').addEventListener('click', function (e) {
+    var b = e.target.closest('.mem3-row');
+    if (b && b.dataset.w) openWordDetail(b.dataset.w);
+  });
 
   // 图鉴
   /* 图鉴内可改学习状态（详情卡「标记已掌握/重置记录」、自定义词库），返回主页要
@@ -6179,6 +6625,11 @@ function bindEvents() {
     var m = getM(woWord);
     m.lv = 5;
     m.due = Date.now() + IV_MIN[5] * 60000;
+    /* SRS 同步（r17）：标记已掌握 → 记忆档位直升成熟并排 30 天后的保持性回归 */
+    var se = srsGet(woWord);
+    se.st = SRS_STAGE_MAX;
+    se.due = Date.now() + SRS_INTERVAL_DAYS[SRS_STAGE_MAX - 1] * 864e5;
+    se.t = Date.now();
     persist();
     closeWordOverlay();
     toast('⭐ 已标记「' + woWord + '」为已掌握');
@@ -6187,6 +6638,7 @@ function bindEvents() {
   $('wo-reset').onclick = function () {
     if (!woWord) return;
     delete save.mastery[woWord];
+    delete save.srs[woWord];   /* SRS 同步（r17）：重置学习记录须连排程一起清，否则残留档位/到期 */
     persist();
     closeWordOverlay();
     toast('♻️ 已重置「' + woWord + '」的学习记录');

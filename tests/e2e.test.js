@@ -20,6 +20,12 @@
          渐入错峰、@keyframes 属性白名单（transform/opacity/filter/box-shadow）扫描、
          连击换挡/答错抖动/正确词延迟强调/失血三档警示类名状态机、结算数字滚动落位、
          横幅点按跳过、切屏回顶）
+     S15 连局压测（r16：同一页面不重载连打 10 局完整对局——主线/远征/肉鸽/听写/热座各
+         2 局混排，每局结算/收官后回主页；断言全程零 pageerror + 每局回主页 + JS heap
+         增长 ≤8MB（每局 CDP 强制 GC 后采样 performance.memory，S15-HEAP 行入基线））
+     S16 间隔重复与记忆画像（r17：SM-2 lite 排程计算/晋升降档/到期队列与空态/复习会话
+         落盘/记忆画像三行+例句填空展开/结算三词卡/词景覆盖率统计（SCENE-STATS 行）/
+         题面词景显示规则与防泄题/连击里程碑单词串 fx）
      S-PERF 性能预算（本地服务：主页加载 ≤3s、首次可交互 ≤5s、JS heap 采样入 PERF-BASELINE 行）
    依赖：playwright 或 playwright-core（找不到时整组 SKIP，退出码 0 并说明原因），
    浏览器可执行文件依次探测 playwright 自带 chromium → 环境变量 WQ_CHROME_PATH →
@@ -265,6 +271,25 @@ async function battleSpell(page, words) {
     if (!done) return 'stuck';
   }
   return 'ok';
+}
+/* 换种子存档：先取消游戏挂起的防抖写盘（persistCancel），再覆写 wq_save_v1 并 reload——
+   否则 pagehide 的 persistFlush（丢档窗口为零的兜底）会把旧档盖回种子（S16 首跑实测踩坑） */
+async function reseedSave(page, seed) {
+  await page.evaluate(s => {
+    if (typeof persistCancel === 'function') persistCancel();
+    localStorage.setItem('wq_save_v1', JSON.stringify(s));
+  }, seed);
+  await page.reload({ waitUntil: 'load' });
+}
+/* 撤退或已结算：局若已自然结束（如 review 队列打满自动收官），直接进结算 */
+async function quitOrSettled(page) {
+  const st = await page.evaluate(() => ({
+    result: document.getElementById('scr-result').classList.contains('active'),
+    battle: document.getElementById('scr-battle').classList.contains('active'),
+    ended: (typeof run !== 'undefined' && run) ? !!run.ended : true
+  }));
+  if (st.result) return;
+  await quitBattle(page);
 }
 /* 结算页结构断言 */
 async function assertResult(page, label, wantTitle, wantChipPart) {
@@ -1383,8 +1408,12 @@ if (!resolvable) {
         // ⑤ 收官：焦点到「再来一局」，tap 续局开出新盘
         const finDesc = await aeDesc();
         ok('S13-⑤ 收官焦点在「再来一局」（' + finDesc + '）', await page.evaluate(() => document.activeElement === document.getElementById('btn-match-restart')), finDesc);
+        const timeBeforeRestart = await page.evaluate(() => document.getElementById('match-time').textContent.trim());
         await page.tap('#btn-match-restart');
         await sleep(450);
+        const timeAfterRestart = await page.evaluate(() => document.getElementById('match-time').textContent.trim());
+        ok('S13-⑤ 续局计时立即归零（' + timeBeforeRestart + ' → ' + timeAfterRestart + '，r15 遗留清零回归）',
+          /0\s*秒/.test(timeAfterRestart), timeAfterRestart);
         ps = await pairsState();
         ok('S13-⑤ 续局新盘（' + ps + '）', ps.indexOf('0/8') >= 0, ps);
         ok('S13-⑤ 续局后焦点不落 BODY（' + (await aeDesc()) + '）', (await aeDesc()) !== 'BODY', await aeDesc());
@@ -1604,6 +1633,544 @@ if (!resolvable) {
         ok('S14-H 返回主页回顶（scrollY=' + backY + '，r15 瑕疵修复回归）', backY === 0, 'backY=' + backY);
         ok('S14 无页面异常（pageerror=0）', errors14.length === 0, errors14.join(' | '));
         await c14.context.close();
+      }
+
+      /* ============ S15 · 连局压测：同一页面连打 10 局完整对局（r16 新增维度） ============
+         主线/远征/肉鸽/听写/热座 各 2 局混排（顺序 1-5 再来一轮），全程不 reload——
+         这正是泄漏/异常积累的温床。每局完整走到结算屏（热座为收官面板）并点「返回主页」。
+         断言：A 每局结算判定逐局核对 + 返回主页成功；B 全程零 pageerror（逐局）；
+         C JS heap 增长 ≤8MB——每局回主页后 CDP 强制 GC（HeapProfiler.collectGarbage，
+         与 NV 压测同款手法）再采样 performance.memory，增长量 = 第 10 局采样 − 第 1 局采样
+         （同主页状态对比，日常 GC 抖动不进差值）；performance.memory 不可得时按 SKIP。 */
+      console.log('---- S15 连局压测（10 局混排） ----');
+      {
+        const c15 = await newContext(browser);
+        const page = c15.page;
+        const errors15 = [];
+        page.on('pageerror', e => errors15.push(e.message));
+        await page.goto(BASE_URL + '/', { waitUntil: 'load' });
+        await page.waitForSelector('#scr-home.active', { timeout: 15000 });
+        /* CDP 强制 GC 会话：建一次全程复用；会话断开等异常只影响当次采样精度 */
+        const cdp15 = await page.context().newCDPSession(page);
+        const heapMB = async () => {
+          try { await cdp15.send('HeapProfiler.collectGarbage'); } catch (e) {}
+          return page.evaluate(() => performance.memory
+            ? Math.round(performance.memory.usedJSHeapSize / 1048576 * 10) / 10 : null);
+        };
+        const heapStart = await heapMB();   // 开局前采样（诊断用，不进增长差值）
+        /* 结算收口：结算屏标题核对 → 返回主页按钮 → scr-home 激活 */
+        const settleAndHome = async (label, wantTitle) => {
+          await waitResult(page, 15000);
+          const r = await page.evaluate(() => ({
+            active: document.getElementById('scr-result').classList.contains('active'),
+            title: document.getElementById('result-title').textContent,
+            homeBtn: !!document.getElementById('btn-result-home')
+          }));
+          ok('S15 ' + label + ' · 结算屏激活且标题=' + wantTitle, r.active && r.title === wantTitle, JSON.stringify(r));
+          ok('S15 ' + label + ' · 返回主页按钮在位', r.homeBtn);
+          await page.click('#btn-result-home');
+          await page.waitForSelector('#scr-home.active', { timeout: 8000 });
+          ok('S15 ' + label + ' · 已回主页', true);
+        };
+        /* 热座收官收口：duel-done 面板 + 判定文案 + 战绩入档（plays +1）→ ← 返回 → scr-home */
+        const duelDoneAndHome = async (label, playsBefore) => {
+          const r = await page.evaluate(p0 => ({
+            done: !document.getElementById('duel-done').hidden,
+            verdict: (document.querySelector('#duel-result .duel-verdict') || {}).textContent || '',
+            chips: document.querySelectorAll('#duel-result .chip').length,
+            plays: (JSON.parse(localStorage.getItem('wq_save_v1')).duel || {}).plays || 0,
+            p0: p0
+          }), playsBefore);
+          ok('S15 ' + label + ' · 对决收官面板（判定=' + r.verdict + ' · 双队 chips=' + r.chips + '）',
+            r.done && r.chips >= 2 && (r.verdict.indexOf('获胜') >= 0 || r.verdict.indexOf('平分秋色') >= 0), JSON.stringify(r));
+          ok('S15 ' + label + ' · 对局战绩入档（plays ' + r.p0 + ' → ' + r.plays + '）', r.plays === r.p0 + 1, JSON.stringify(r));
+          await page.click('#btn-duel-back');
+          await page.waitForSelector('#scr-home.active', { timeout: 8000 });
+          ok('S15 ' + label + ' · 已回主页', true);
+        };
+        /* 热座一整局：进对决屏 → 12 问轮流交接（ready → 点正确项 → 揭晓 1.5s）→ 收官面板；
+           首次交接/首次出题各锚定一次焦点断言（r15 遗留清零回归：handoff 焦点交
+           #btn-duel-ready、出题后交 #scr-duel 屏容器）。返回 turn 数供诊断 */
+        const duelPlayFull = async (label) => {
+          await page.click('#btn-duel');
+          await page.waitForSelector('#scr-duel.active', { timeout: 5000 });
+          await page.click('#btn-duel-start');
+          const focusChecked = { handoff: false, q: false };
+          for (let guard = 0; guard < 80; guard++) {
+            const st = await page.evaluate(() => {
+              const d = (typeof duel === 'undefined') ? null : duel;
+              return {
+                phase: d ? d.phase : null, turn: d ? d.turn : 0,
+                donePanel: !document.getElementById('duel-done').hidden,
+                answer: d && d.q ? d.q.answer : null,
+                locked: d && d.q ? !!d.q.locked : true
+              };
+            });
+            if (st.donePanel) return st.turn;
+            if (!st.phase) return -1;
+            if (st.phase === 'handoff') {
+              if (!focusChecked.handoff) {
+                focusChecked.handoff = true;
+                const ae = await page.evaluate(() => (document.activeElement || {}).id || '');
+                ok('S15 ' + label + ' · 交接横幅焦点锚定 #btn-duel-ready（r15 遗留清零回归）', ae === 'btn-duel-ready', 'activeElement=' + ae);
+              }
+              await page.click('#btn-duel-ready'); await sleep(220); continue;
+            }
+            if (st.phase === 'q' && !st.locked && st.answer !== null) {
+              if (!focusChecked.q) {
+                focusChecked.q = true;
+                const ae = await page.evaluate(() => (document.activeElement || {}).id || '');
+                ok('S15 ' + label + ' · 出题后焦点锚定 #scr-duel 容器（r15 遗留清零对称回归）', ae === 'scr-duel', 'activeElement=' + ae);
+              }
+              await page.click('#duel-opts .q-opt >> nth=' + st.answer).catch(() => {});
+              await sleep(1750);   /* 揭晓停留 1.5s（答对路径）后进下一题交接 */
+              continue;
+            }
+            await sleep(280);
+          }
+          return -2;
+        };
+        /* 肉鸽开局共用：天赋避开 ranger（全场强制拼写题，选择题循环答不了）→ 诅咒签 → 开战 */
+        const rogueStart = async () => {
+          await page.click('#btn-rogue');
+          await page.waitForSelector('#scr-rogue.active', { timeout: 5000 });
+          await page.click('#btn-rogue-start');
+          await page.waitForSelector('[data-rogue-t]', { timeout: 5000 });
+          const tIds = await page.evaluate(() => Array.from(document.querySelectorAll('[data-rogue-t]')).map(el => el.getAttribute('data-rogue-t')));
+          await page.click('[data-rogue-t="' + (tIds.find(id => id !== 'ranger') || tIds[0]) + '"]');
+          await page.waitForSelector('[data-rogue-c]', { timeout: 5000 });
+          await page.click('[data-rogue-c]');
+          await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        };
+        /* 每局结束后统一收口：heap 采样 + 逐局零 pageerror */
+        const afterGame = async (n) => {
+          heaps15.push(await heapMB());
+          ok('S15 第' + n + '局 · 零 pageerror（累计 ' + errors15.length + '）', errors15.length === 0, errors15.join(' | '));
+        };
+        const heaps15 = [];
+
+        /* ---------- 第 1-5 局 ---------- */
+        await startBattleFromSetup(page, 'adventure');
+        await battleChoice(page, 2);
+        await quitBattle(page);
+        await settleAndHome('第1局·主线冒险', '🏳️ 撤退整顿');
+        await afterGame(1);
+
+        await startBattleFromSetup(page, 'expedition', null);
+        await battleChoice(page, 1);
+        await quitBattle(page);
+        await settleAndHome('第2局·每日远征', '🏳️ 远征撤退');
+        await afterGame(2);
+
+        await rogueStart();
+        await battleChoice(page, 1);
+        await quitBattle(page);
+        await settleAndHome('第3局·词魂肉鸽', '🏳️ 词魂撤退');
+        await afterGame(3);
+
+        await startBattleFromSetup(page, 'dictation', 10);
+        const d15a = await battleSpell(page, 10);   // 全 10 词拼完 = 自然终局
+        ok('S15 第4局·听写 · 10 词拼完（' + d15a + '）', d15a === 'ok' || d15a === 'ended', d15a);
+        await settleAndHome('第4局·听写挑战', '🎧 听写挑战完成！');
+        await afterGame(4);
+
+        let duelPlays = await page.evaluate(() => (JSON.parse(localStorage.getItem('wq_save_v1')).duel || {}).plays || 0);
+        const duelTurns1 = await duelPlayFull('第5局·热座');
+        ok('S15 第5局·热座 · 12 问打满（turn=' + duelTurns1 + '）', duelTurns1 === 12, 'turn=' + duelTurns1);
+        await duelDoneAndHome('第5局·热座对决', duelPlays);
+        await afterGame(5);
+
+        /* ---------- 第 6-10 局 ---------- */
+        await startBattleFromSetup(page, 'adventure');
+        await battleChoice(page, 1);
+        await quitBattle(page);
+        await settleAndHome('第6局·主线冒险', '🏳️ 撤退整顿');
+        await afterGame(6);
+
+        await startBattleFromSetup(page, 'expedition', null);
+        await battleChoice(page, 1);
+        await quitBattle(page);
+        await settleAndHome('第7局·每日远征', '🏳️ 远征撤退');
+        await afterGame(7);
+
+        await rogueStart();
+        await battleChoice(page, 1);
+        await quitBattle(page);
+        await settleAndHome('第8局·词魂肉鸽', '🏳️ 词魂撤退');
+        await afterGame(8);
+
+        await startBattleFromSetup(page, 'dictation', 10);
+        await battleSpell(page, 3);
+        await quitBattle(page);
+        await settleAndHome('第9局·听写挑战', '🏳️ 听写中途退出');
+        await afterGame(9);
+
+        duelPlays = await page.evaluate(() => (JSON.parse(localStorage.getItem('wq_save_v1')).duel || {}).plays || 0);
+        const duelTurns2 = await duelPlayFull('第10局·热座');
+        ok('S15 第10局·热座 · 12 问打满（turn=' + duelTurns2 + '）', duelTurns2 === 12, 'turn=' + duelTurns2);
+        await duelDoneAndHome('第10局·热座对决', duelPlays);
+        await afterGame(10);
+
+        /* ---------- 压测总判定：零 pageerror + heap 增长 ≤8MB ---------- */
+        ok('S15 全程零 pageerror（10 局累计 ' + errors15.length + '）', errors15.length === 0, errors15.slice(0, 6).join(' | '));
+        if (heaps15.length === 10 && heaps15.every(h => h !== null)) {
+          const growth = Math.round((heaps15[9] - heaps15[0]) * 10) / 10;
+          ok('S15 JS heap 增长 ≤8MB（第1局后 ' + heaps15[0] + 'MB → 第10局后 ' + heaps15[9] + 'MB，增长 ' + growth + 'MB，开局前 ' + heapStart + 'MB）',
+            growth <= 8, 'growth=' + growth);
+          /* 基线行（供后续轮次对比，勿删除） */
+          console.log('S15-HEAP ' + JSON.stringify({ heapStartMB: heapStart, samplesMB: heaps15, growthMB: growth }));
+        } else {
+          skip('S15 JS heap 增长 ≤8MB', 'performance.memory 不可得（samples=' + JSON.stringify(heaps15) + '）');
+        }
+        await c15.context.close();
+      }
+
+      /* ============ S16 · 间隔重复与记忆画像（r17 新增维度） ============
+         A 排程计算：页内真实 srsReview 走「新词→1天→3天→7天→成熟」晋升链与答错降档
+         B 到期队列：空态文案（无到期不空开局）/ 主页入口计数 / 明天才到期与远期成熟不入队
+         C 复习会话：答对晋升+落盘（st/due 写回 localStorage）/ 答错降档+立即到期 /
+           复习完成结算（晋升·降档 chips）
+         D 记忆画像：词根拆解行 / 无词根词音节兜底 / 联想一行 / 例句填空（首字母提示
+           aria-expanded 展开 → 揭晓换真词）
+         E 结算三词卡：错词入选，点击直达记忆画像
+         F 词景：映射 ≥6 类且每类 ≥10 条 / 全库覆盖率统计（SCENE-STATS 基线行）/
+           题面仅词面暴露题型显示（e2c）且内容与 sceneOf 一致 / c2e 防泄题不显示
+         G 连击 5 里程碑 fx 显示所连单词串（🔗 5 连击：… 与 run.comboWords 一致） */
+      console.log('---- S16 间隔重复与记忆画像（r17） ----');
+      {
+        /* ---------- A. 排程计算：晋升链 / 降档（页内真实函数） ---------- */
+        const c16a = await newContext(browser);
+        {
+          const page = c16a.page;
+          const errorsA = [];
+          page.on('pageerror', e => errorsA.push(e.message));
+          await gotoHome(page);
+          const chain = await page.evaluate(() => {
+            const DAY = 864e5, out = [];
+            const snap = w => { const e = (JSON.parse(JSON.stringify(save.srs)))[w]; return e; };
+            srsReview('abandon', true);   // 生词首答对 → 1 天档
+            let t = Date.now(), e = snap('abandon');
+            out.push({ k: 'st1', st: e.st, dt: e.due - t });
+            srsReview('abandon', true); t = Date.now(); e = snap('abandon');   // → 3 天档
+            out.push({ k: 'st2', st: e.st, dt: e.due - t });
+            srsReview('abandon', true); t = Date.now(); e = snap('abandon');   // → 7 天档
+            out.push({ k: 'st3', st: e.st, dt: e.due - t });
+            srsReview('abandon', true); t = Date.now(); e = snap('abandon');   // → 成熟
+            out.push({ k: 'st4', st: e.st, dt: e.due - t });
+            srsReview('abandon', true); t = Date.now(); e = snap('abandon');   // 成熟维持
+            out.push({ k: 'st4b', st: e.st, dt: e.due - t });
+            srsReview('abandon', false); e = snap('abandon');                  // 答错降档
+            out.push({ k: 'down', st: e.st, dueNow: e.due <= Date.now() });
+            srsReview('ability', false); const e2 = snap('ability');           // 新词答错维持新词
+            out.push({ k: 'down0', st: e2.st, dueNow: e2.due <= Date.now() });
+            out.push({ k: 'iv', iv: JSON.parse(JSON.stringify(SRS_INTERVAL_DAYS)), max: SRS_STAGE_MAX });
+            return out;
+          });
+          ok('S16-A 档位阶梯常量 [1,3,7,30] / 上限 4', JSON.stringify(chain[7].iv) === '[1,3,7,30]' && chain[7].max === 4, JSON.stringify(chain[7].iv) + '/' + chain[7].max);
+          ok('S16-A 生词答对 → 1 天档（due≈+1 天）', chain[0].st === 1 && Math.abs(chain[0].dt - 864e5) < 3000, JSON.stringify(chain[0]));
+          ok('S16-A 1天档答对 → 3 天档（due≈+3 天）', chain[1].st === 2 && Math.abs(chain[1].dt - 3 * 864e5) < 3000, JSON.stringify(chain[1]));
+          ok('S16-A 3天档答对 → 7 天档（due≈+7 天）', chain[2].st === 3 && Math.abs(chain[2].dt - 7 * 864e5) < 3000, JSON.stringify(chain[2]));
+          ok('S16-A 7天档答对 → 成熟（due≈+30 天）', chain[3].st === 4 && Math.abs(chain[3].dt - 30 * 864e5) < 3000, JSON.stringify(chain[3]));
+          ok('S16-A 成熟档答对维持成熟（30 天回归）', chain[4].st === 4 && Math.abs(chain[4].dt - 30 * 864e5) < 3000, JSON.stringify(chain[4]));
+          ok('S16-A 答错降档且立即到期', chain[5].st === 3 && chain[5].dueNow, JSON.stringify(chain[5]));
+          ok('S16-A 新词答错维持新词档', chain[6].st === 0 && chain[6].dueNow, JSON.stringify(chain[6]));
+          ok('S16-A 排程零页面异常', errorsA.length === 0, errorsA.join(' | '));
+        }
+        await c16a.context.close();
+
+        /* ---------- B. 空态：无到期词 → 明确空态文案，不空开局 ---------- */
+        const c16b = await newContext(browser);
+        {
+          const page = c16b.page;
+          await gotoHome(page);
+          const emptySub = await page.textContent('#srs-sub');
+          ok('S16-B 无到期词入口空态文案（今日没有到期词…）', emptySub.indexOf('今日没有到期词') >= 0, emptySub);
+          await page.click('#btn-srs-review');
+          await sleep(500);
+          const after = await page.evaluate(() => ({
+            home: document.getElementById('scr-home').classList.contains('active'),
+            battle: document.getElementById('scr-battle').classList.contains('active'),
+            toast: (document.querySelector('#toast-wrap .toast:last-child') || {}).textContent || ''
+          }));
+          ok('S16-B 点击后仍留主页（不空开局）', after.home && !after.battle, JSON.stringify(after));
+          ok('S16-B 空态 toast 提示', after.toast.indexOf('今天没有到期') >= 0, after.toast);
+        }
+        await c16b.context.close();
+
+        /* ---------- B2+C. 到期队列入口 → 复习会话：答对晋升/答错降档并落盘 ---------- */
+        const seedSrs = baseSave();
+        seedSrs.settings = { choiceOnlyMigrated: true, c2eOnlyMigrated: true, bgmOffMigrated: true,
+          qtypes: { c2e: true, e2c: false, spell: false, listen: false } };
+        const DAY_MS = 864e5;
+        seedSrs.srs = {
+          abandon: { st: 1, due: Date.now() - 3 * DAY_MS, ok: 1, wrong: 0, t: Date.now() },   // 最逾期
+          absorb: { st: 2, due: Date.now() - 1 * DAY_MS, ok: 2, wrong: 1, t: Date.now() },
+          accent: { st: 1, due: Date.now() + 36 * 3600e3, ok: 1, wrong: 0, t: Date.now() },   // 36h 后=明天才到期 → 不计入今日
+          account: { st: 4, due: Date.now() + 20 * DAY_MS, ok: 5, wrong: 0, t: Date.now() }   // 成熟远期 → 不计入
+        };
+        const c16c = await newContext(browser, seedSrs);
+        {
+          const page = c16c.page;
+          const errorsC = [];
+          page.on('pageerror', e => errorsC.push(e.message));
+          await gotoHome(page);
+          const sub = await page.textContent('#srs-sub');
+          ok('S16-B2 入口计数「今日到期 2 词」（明天的 accent / 远期 account 不计）',
+            sub.indexOf('今日到期 2 词') >= 0, sub);
+          await page.click('#btn-srs-review');
+          await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+          await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q, { timeout: 15000 });
+          const sess0 = await page.evaluate(() => ({ mode: run.mode, total: run.reviewTotal, word: run.q.word.w,
+            banner: document.getElementById('banner-box').textContent }));
+          ok('S16-C 会话 mode=srs / 词队列=2', sess0.mode === 'srs' && sess0.total === 2, JSON.stringify(sess0));
+          ok('S16-C 横幅为「今日待复习 · 答对晋升/答错降档」',
+            sess0.banner.indexOf('今日待复习') >= 0 && sess0.banner.indexOf('答对晋升') >= 0 && sess0.banner.indexOf('不扣血') >= 0, sess0.banner);
+          ok('S16-C 队列最逾期优先（第 1 词=abandon）', sess0.word === 'abandon', sess0.word);
+
+          /* 答对 abandon：st 1→2，due≈+3 天，并已落盘（localStorage 读档核对） */
+          await battleChoice(page, 1);
+          await sleep(500);
+          const savedUp = await page.evaluate(() => JSON.parse(localStorage.getItem('wq_save_v1')).srs.abandon);
+          ok('S16-C 答对晋升落盘：abandon st 1→2', savedUp.st === 2, JSON.stringify(savedUp));
+          ok('S16-C 答对排程落盘：due≈now+3 天', Math.abs(savedUp.due - (Date.now() + 3 * 864e5)) < 5000, savedUp.due - Date.now());
+
+          /* 答错 absorb：st 2→1 且 due≤now（记忆卡弹出即已落盘）→ 重考答对回升 2 */
+          await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && run.q.word.w === 'absorb', { timeout: 15000 });
+          await answerWrongOnce(page);
+          await page.waitForSelector('#memcard:not([hidden])', { timeout: 8000 });
+          const savedDown = await page.evaluate(() => JSON.parse(localStorage.getItem('wq_save_v1')).srs.absorb);
+          ok('S16-C 答错降档落盘：absorb st 2→1 / 立即到期', savedDown.st === 1 && savedDown.due <= Date.now(), JSON.stringify(savedDown));
+          await page.click('#mem-ok');
+          await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked, { timeout: 15000 });
+          const retryWord = await page.evaluate(() => run.q.word.w);
+          ok('S16-C 答错后同词重考（absorb）', retryWord === 'absorb', retryWord);
+          await battleChoice(page, 1);
+          await sleep(500);
+          const savedRetry = await page.evaluate(() => JSON.parse(localStorage.getItem('wq_save_v1')).srs.absorb);
+          ok('S16-C 重考答对晋升回升 st=2（晋升/降档双向落盘）', savedRetry.st === 2, JSON.stringify(savedRetry));
+
+          /* 队列 2 词打完 → 自动结算（晋升/降档 chips） */
+          await waitResult(page, 15000);
+          await assertResult(page, 'S16-C 复习完成', '🧠 今日待复习完成！', '🧠 复习 2 词');
+          const chips = await page.evaluate(() => Array.from(document.querySelectorAll('#result-stats .chip')).map(c => c.textContent.trim()));
+          ok('S16-C 结算含「⬆️ 晋升 1 词」', chips.some(c => c.indexOf('⬆️ 晋升 1') >= 0), JSON.stringify(chips));
+          ok('S16-C 结算含「⬇️ 降档 1 词」', chips.some(c => c.indexOf('⬇️ 降档 1') >= 0), JSON.stringify(chips));
+          ok('S16-C 全程零页面异常', errorsC.length === 0, errorsC.join(' | '));
+
+          /* ---------- E. 结算三词卡：错词入选，点击直达记忆画像 ---------- */
+          const mem3 = await page.evaluate(() => ({
+            visible: !document.getElementById('mem3-card').hidden,
+            rows: Array.from(document.querySelectorAll('#mem3-list .mem3-row')).map(b => ({
+              w: b.dataset.w,
+              scene: b.querySelector('.mem3-scene').textContent,
+              why: b.querySelector('.mem3-why').textContent
+            })),
+            hint: (document.querySelector('#mem3-card .hint') || {}).textContent || ''
+          }));
+          ok('S16-E 三词卡可见且错词 absorb 入选（1 行）', mem3.visible && mem3.rows.length === 1 && mem3.rows[0].w === 'absorb', JSON.stringify(mem3));
+          ok('S16-E 行内标注答错原因（❌ 答错 1 次）', mem3.rows.length && mem3.rows[0].why.indexOf('❌ 答错 1') >= 0, mem3.rows.length ? mem3.rows[0].why : '');
+          await page.click('#mem3-list .mem3-row');
+          await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 5000 });
+          const woFromMem3 = await page.evaluate(() => ({
+            word: document.getElementById('wo-word').textContent,
+            profile: !document.getElementById('wo-profile').hidden
+          }));
+          ok('S16-E 点击三词卡直达记忆画像（absorb）', woFromMem3.word.indexOf('absorb') >= 0 && woFromMem3.profile, JSON.stringify(woFromMem3));
+          await page.click('#wo-close');
+          await page.click('#btn-result-home');
+          await backHome(page);
+        }
+        await c16c.context.close();
+
+        /* ---------- D. 记忆画像：词根拆解 / 音节兜底 / 例句填空 ---------- */
+        const c16d = await newContext(browser);
+        {
+          const page = c16d.page;
+          const errorsD = [];
+          page.on('pageerror', e => errorsD.push(e.message));
+          await gotoHome(page);
+          await page.click('#btn-codex');
+          await page.waitForSelector('#scr-codex.active', { timeout: 5000 });
+          /* ① 有词根词 transport：🧩 拆解行 + 💡 联想 + ✍️ 例句 + 首字母展开 + 揭晓 */
+          await page.fill('#codex-search', 'transport');
+          await page.waitForSelector('#codex-list .cx-row', { timeout: 5000 });
+          await page.click('#codex-list .cx-row');
+          await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 5000 });
+          const prof1 = await page.evaluate(() => {
+            const rows = Array.from(document.querySelectorAll('#wo-profile .wp-row')).map(r => ({
+              tag: r.querySelector('.wp-tag').textContent,
+              val: r.querySelector('.wp-val').textContent
+            }));
+            return {
+              rows: rows,
+              hintBtn: !!document.getElementById('wo-cloze-hint'),
+              revealBtn: !!document.getElementById('wo-cloze-reveal'),
+              clozeVal: (document.querySelector('.wp-cloze .wp-val') || {}).textContent || ''
+            };
+          });
+          ok('S16-D 记忆画像三行结构（拆解/联想/例句）', prof1.rows.length === 3 &&
+            prof1.rows[0].tag.indexOf('拆解') >= 0 && prof1.rows[1].tag.indexOf('联想') >= 0 && prof1.rows[2].tag.indexOf('例句') >= 0,
+            JSON.stringify(prof1.rows));
+          ok('S16-D transport 拆解行复用词汇密码（含 trans/port）',
+            prof1.rows[0].val.indexOf('trans') >= 0 && prof1.rows[0].val.indexOf('port') >= 0, prof1.rows[0].val);
+          ok('S16-D 联想行带词景或钩子（非空）', prof1.rows[1].val.length >= 4, prof1.rows[1].val);
+          ok('S16-D 例句挖空 ____', prof1.clozeVal.indexOf('____') >= 0, prof1.clozeVal);
+          await page.click('#wo-cloze-hint');
+          const hint1 = await page.evaluate(() => ({
+            expanded: document.getElementById('wo-cloze-hint').getAttribute('aria-expanded'),
+            text: document.getElementById('wo-cloze-hinttext').textContent,
+            visible: !document.getElementById('wo-cloze-hinttext').hidden
+          }));
+          ok('S16-D 首字母提示展开（aria-expanded=true · T·9 字母）',
+            hint1.expanded === 'true' && hint1.visible && /首字母 T/i.test(hint1.text) && hint1.text.indexOf('9') >= 0, JSON.stringify(hint1));
+          await page.click('#wo-cloze-hint');
+          const hint2 = await page.evaluate(() => ({
+            expanded: document.getElementById('wo-cloze-hint').getAttribute('aria-expanded'),
+            hidden: document.getElementById('wo-cloze-hinttext').hidden
+          }));
+          ok('S16-D 提示可收起（aria-expanded=false）', hint2.expanded === 'false' && hint2.hidden, JSON.stringify(hint2));
+          await page.click('#wo-cloze-reveal');
+          const revealed = await page.evaluate(() => (document.querySelector('.wp-cloze .wp-val') || {}).textContent || '');
+          ok('S16-D 揭晓后挖空换真词 transport', revealed.indexOf('transport') >= 0 && revealed.indexOf('____') < 0, revealed);
+          await page.click('#wo-close');
+          /* ② 无词根词 abandon：fallback 音节拆分行 */
+          await page.fill('#codex-search', 'abandon');
+          await page.waitForSelector('#codex-list .cx-row', { timeout: 5000 });
+          await page.click('#codex-list .cx-row');
+          await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 5000 });
+          const prof2 = await page.evaluate(() => {
+            const r0 = document.querySelector('#wo-profile .wp-row');
+            return { tag: r0.querySelector('.wp-tag').textContent, val: r0.querySelector('.wp-val').textContent };
+          });
+          ok('S16-D 无词根词 fallback 音节拆分（abandon → a·ban·don）',
+            prof2.tag.indexOf('音节') >= 0 && prof2.val === 'a·ban·don', JSON.stringify(prof2));
+          ok('S16-D 记忆画像零页面异常', errorsD.length === 0, errorsD.join(' | '));
+          await page.click('#wo-close');
+          await page.click('#btn-codex-back');
+          await backHome(page);
+
+          /* ---------- F. 词景：覆盖率统计 + 题面显示规则 ---------- */
+          const stats = await page.evaluate(() => {
+            const per = SCENE_CATS.map(c => ({ id: c.id, n: Object.keys(c.words).length }));
+            let covered = 0;
+            ALL_WORDS.forEach(it => { if (sceneOf(it.w)) covered++; });
+            return { cats: SCENE_CATS.length, per: per, covered: covered, total: ALL_WORDS.length };
+          });
+          ok('S16-F 词景 ≥6 类（实际 ' + stats.cats + '）', stats.cats >= 6, stats.cats);
+          ok('S16-F 每类显式映射 ≥10 条', stats.per.every(p => p.n >= 10), JSON.stringify(stats.per));
+          ok('S16-F 全库词景覆盖 ≥300 词（' + stats.covered + '/' + stats.total + '）',
+            stats.covered >= 300, stats.covered + '/' + stats.total);
+          /* 基线行（供后续轮次对比覆盖率，勿删除） */
+          console.log('SCENE-STATS ' + JSON.stringify({ covered: stats.covered, total: stats.total,
+            pct: Math.round(stats.covered / stats.total * 1000) / 10, perCat: stats.per }));
+
+          /* 题面规则：e2c-only 局——词面已暴露 → 词景显示且内容与 sceneOf 一致。
+             词池用 8 词景 + 8 非词景的自定义词库（50/50 稳定抽样，避免按内置词库
+             ~10% 词景密度抽 12 题撞不到 2 例的偶然失败）；换种子直接覆写
+             wq_save_v1（wq_seed_done 仍为 '1'，init 脚本不会再盖回） */
+          const seedE2c = baseSave();
+          seedE2c.settings = { choiceOnlyMigrated: true, c2eOnlyMigrated: true, bgmOffMigrated: true,
+            qtypes: { c2e: false, e2c: true, spell: false, listen: false } };
+          seedE2c.customLists = [{ id: 'custom_scene', name: '词景抽样', desc: 'S16 词景抽样', words: [
+            ['castle', 'n. 城堡'], ['insect', 'n. 昆虫'], ['volcano', 'n. 火山'], ['tunnel', 'n. 隧道'],
+            ['beach', 'n. 海滩'], ['anxiety', 'n. 焦虑'], ['leap', 'n. 跳跃 v. 跳'], ['appetite', 'n. 食欲；欲望'],
+            ['ability', 'n. 能力；才能'], ['abandon', 'v. 放弃；抛弃'], ['absorb', 'v. 吸收；吸引'],
+            ['academic', 'adj. 学术的'], ['achieve', 'v. 实现；达到'], ['acquire', 'v. 获得；学到'],
+            ['adequate', 'adj. 充足的'], ['advantage', 'n. 优势']
+          ] }];
+          seedE2c.lastLists = ['custom_scene'];
+          await reseedSave(page, seedE2c);
+          await page.waitForSelector('#scr-home.active', { timeout: 15000 });
+          await page.click('#btn-review');
+          await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+          await page.click('#btn-start');
+          await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+          let withScene = 0, noScene = 0, mismatch = null;
+          for (let i = 0; i < 12 && (withScene < 2 || noScene < 2); i++) {
+            await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked && !run.ended, { timeout: 15000 }).catch(() => {});
+            if (await page.evaluate(() => (typeof run !== 'undefined' && run) ? !!run.ended : true)) break;
+            const chk = await page.evaluate(() => ({
+              word: run.q.word.w,
+              sceneExpected: sceneOf(run.q.word.w),
+              shown: !document.getElementById('q-scene').hidden,
+              content: document.getElementById('q-scene').textContent
+            }));
+            if (chk.sceneExpected) {
+              withScene++;
+              if (!chk.shown || chk.content !== chk.sceneExpected) mismatch = chk;
+            } else {
+              noScene++;
+              if (chk.shown) mismatch = chk;
+            }
+            await clickCorrectOnce(page);
+            await sleep(1150);
+          }
+          ok('S16-F e2c 题面词景显示 ≥2 例且与 sceneOf 一致', withScene >= 2 && !mismatch, JSON.stringify({ withScene, mismatch }));
+          ok('S16-F 无景词题面保持隐藏 ≥2 例', noScene >= 2, JSON.stringify({ noScene }));
+
+          /* c2e 防泄题：词就是答案 → 词景不自动显示 */
+          await quitOrSettled(page);
+          await waitResult(page, 15000);
+          await page.click('#btn-result-home');
+          await backHome(page);
+          const seedC2e = baseSave();
+          seedC2e.settings = { choiceOnlyMigrated: true, c2eOnlyMigrated: true, bgmOffMigrated: true,
+            qtypes: { c2e: true, e2c: false, spell: false, listen: false } };
+          await reseedSave(page, seedC2e);
+          await page.waitForSelector('#scr-home.active', { timeout: 15000 });
+          await page.click('#btn-review');
+          await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+          await page.click('#btn-start');
+          await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+          let shownInC2e = 0, checkedC2e = 0;
+          for (let i = 0; i < 6; i++) {
+            await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked && !run.ended, { timeout: 15000 }).catch(() => {});
+            if (await page.evaluate(() => (typeof run !== 'undefined' && run) ? !!run.ended : true)) break;
+            const chk = await page.evaluate(() => ({ shown: !document.getElementById('q-scene').hidden }));
+            checkedC2e++;
+            if (chk.shown) shownInC2e++;
+            await clickCorrectOnce(page);
+            await sleep(1150);
+          }
+          ok('S16-F c2e 题（词=答案）词景不自动显示，防泄题（' + checkedC2e + ' 题抽检）', shownInC2e === 0, shownInC2e);
+
+          /* ---------- G. 连击 5 里程碑 fx：显示所连单词串 ---------- */
+          await quitOrSettled(page);
+          await waitResult(page, 15000);
+          await page.click('#btn-result-home');
+          await backHome(page);
+          await page.click('#btn-review');
+          await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+          await page.click('#btn-start');
+          await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+          await battleChoice(page, 4);   // 4 连击铺垫（每答对即击杀，连击不中断）
+          let comboFx = null, comboTries = 0;
+          while (comboTries < 6 && !(comboFx && comboFx.text)) {
+            comboTries++;
+            await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked && !run.ended, { timeout: 15000 }).catch(() => {});
+            const comboNow = await page.evaluate(() => (typeof run !== 'undefined' && run && !run.ended) ? run.combo : -1);
+            if (comboNow < 0) break;
+            await clickCorrectOnce(page);
+            if (comboNow === 4) {   // 这一次点击把连击推到 5 → comboBurst → fx 立即出现（存活 1s）
+              comboFx = await page.evaluate(() => {
+                const el = document.querySelector('#fx-layer .fx-dmg.combo-chain');
+                return { text: el ? el.textContent : '', words: (typeof run !== 'undefined' && run) ? run.comboWords.slice() : [] };
+              });
+              break;
+            }
+            await sleep(1150);
+          }
+          ok('S16-G 连击 5 fx 显示单词串（🔗 5 连击：…）',
+            !!comboFx && comboFx.text.indexOf('🔗 5 连击：') === 0 && comboFx.text.indexOf(comboFx.words.join(' · ')) >= 0,
+            JSON.stringify(comboFx));
+          ok('S16-G 单词串 = 本轮连续答对的 5 个词', !!comboFx && comboFx.words.length === 5, JSON.stringify(comboFx && comboFx.words));
+          ok('S16-D/F/G 零页面异常', errorsD.length === 0, errorsD.join(' | '));
+          await quitOrSettled(page);
+          await waitResult(page, 15000);
+          await page.click('#btn-result-home');
+          await backHome(page);
+        }
+        await c16d.context.close();
       }
 
       /* ============ S-PERF · 性能预算基线（本地服务 · 每轮对比） ============ */

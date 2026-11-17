@@ -482,6 +482,12 @@ body {
 }
 .fx-dmg.bad { color: var(--c-bad); text-shadow: 0 2px 0 #000, 0 0 18px rgba(255,93,115,.6); }
 .fx-dmg.good { color: var(--c-good); text-shadow: 0 2px 0 #000, 0 0 18px rgba(61,220,132,.6); }
+/* 连击里程碑单词串（r17）：金色小字号长条，字号随词串长度自适应防溢出 */
+.fx-dmg.combo-chain {
+  font-size: 17px; font-weight: 700; letter-spacing: .4px;
+  max-width: 86vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: #ffd166; text-shadow: 0 2px 0 #000, 0 0 16px rgba(255,209,102,.55);
+}
 @keyframes fxFloat {
   0% { transform: translateY(0) scale(.6); opacity: 0; }
   15% { transform: translateY(-12px) scale(1.25); opacity: 1; }
@@ -1035,6 +1041,56 @@ a.btn { text-decoration: none; display: inline-block; }
   padding: 8px 10px; margin: 0 0 12px;
   line-height: 1.5;
 }
+
+/* ---------- 词景（题面 2-3 元素 emoji 场景，r17） ---------- */
+.q-scene {
+  font-size: 34px; line-height: 1.15; letter-spacing: 6px;
+  text-align: center;
+  padding: 6px 0 2px;
+  filter: drop-shadow(0 3px 6px rgba(0,0,0,.35));
+  animation: sceneIn var(--t-dur) var(--t-ease);
+}
+@keyframes sceneIn { 0% { opacity: 0; transform: translateY(4px) scale(.92); } 100% { opacity: 1; transform: none; } }
+
+/* ---------- 记忆画像（词详情弹层，r17） ---------- */
+.wo-profile {
+  display: flex; flex-direction: column; gap: 8px;
+  background: rgba(124,92,255,.1);
+  border: 1px dashed rgba(124,92,255,.45);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  text-align: left;
+}
+.wo-profile[hidden] { display: none; }
+.wp-row { display: flex; align-items: baseline; gap: 8px; line-height: 1.55; }
+.wp-tag { flex-shrink: 0; font-size: 11px; font-weight: 700; color: #b9a8ff; }
+.wp-val { flex: 1; font-size: 13px; color: #e6e1ff; word-break: break-word; }
+.wp-val.cloze-done { color: #7ce8ff; font-weight: 700; }
+.wp-cloze .wp-val { font-style: italic; }
+.wp-cloze-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cloze-hint { font-size: 12px; color: #ffd166; }
+.cloze-hint[hidden] { display: none; }
+
+/* ---------- 结算 · 本次最该记住的 3 词（r17） ---------- */
+.mem3-card { margin: 2px 0 14px; }
+.mem3-card .hint { font-size: 11px; color: var(--c-sub); margin: 6px 0 0; text-align: center; }
+.mem3-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.mem3-row {
+  font-family: inherit; cursor: pointer; text-align: left;
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(124,92,255,.12);
+  border: 1px solid rgba(124,92,255,.4);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: inherit;
+  transition: background var(--t-dur) var(--t-ease), border-color var(--t-dur) var(--t-ease);
+}
+.mem3-row:hover, .mem3-row:focus-visible { background: rgba(124,92,255,.26); border-color: #b9a8ff; }
+.mem3-scene { font-size: 24px; line-height: 1; flex-shrink: 0; letter-spacing: 2px; }
+.mem3-word { font-size: 15px; font-weight: 800; color: #ffd166; flex-shrink: 0; }
+.mem3-mean { flex: 1; font-size: 12px; color: var(--c-sub); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mem3-why { flex-shrink: 0; font-size: 11px; color: #ff9aa6; }
 
 /* ---------- 屏幕震动 ---------- */
 #app.shake { animation: appShake .4s ease; }
