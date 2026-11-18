@@ -28,7 +28,7 @@ function section(fromMark, toMark) {
 /* ---------- 词库数据（words.js 独立加载，同 src-check/poison-codec-test.js） ---------- */
 const wordsSrc = fs.readFileSync(path.join(ROOT, 'words.js'), 'utf8');
 const wordsBox = {};
-new Function('box', wordsSrc + '; box.WORD_LISTS = WORD_LISTS; box.ALL_WORDS = ALL_WORDS; box.MEANING_OF = MEANING_OF;')(wordsBox);
+new Function('box', wordsSrc + '; box.WORD_LISTS = WORD_LISTS; box.ALL_WORDS = ALL_WORDS; box.MEANING_OF = MEANING_OF; box.EMOJI_OF = EMOJI_OF;')(wordsBox);
 
 /* ---------- 桩环境 ---------- */
 const toasts = [];
@@ -45,6 +45,8 @@ const env = {
   console, Math, Date, JSON, Promise, isNaN, parseInt, parseFloat,
   setTimeout, clearTimeout, setInterval, clearInterval,
   ALL_WORDS: wordsBox.ALL_WORDS, MEANING_OF: wordsBox.MEANING_OF, WORD_LISTS: wordsBox.WORD_LISTS,
+  EMOJI_OF: wordsBox.EMOJI_OF,            // r17 词景：EMOJI_OF 派生场景用
+  posOf: function (m) { return (/^(n|v|adj|adv|prep|conj|pron)\b/.exec(m || '') || ['', ''])[1]; },   // clozeOf 词性判断（与 game.js 出题节同式）
   localStorage: (function () {
     var m = {};
     return {
@@ -86,6 +88,7 @@ els['toast-wrap'] = fakeEl();
 
 /* ---------- 各节切片（顺序与 game.js 一致，共享同一函数作用域） ---------- */
 const secSave    = section('/* ========================= 存档', '/* ========================= 音效');
+const secScene   = section('/* ========================= 词景', '/* ========================= 每日学习计划');   // r17：词景/音节/例句
 const secConsts  = section('/* ========================= 游戏内容常量', '/* ========================= 每日任务');
 const secRng     = section('function hashStr(s) {', 'function ensureDaily() {');   // hashStr/mulberry32/seededShuffle（词境确定性抽样用）
 const secAch     = section('/* ========================= 成就', '/* ========================= 全局提示 Toast');
@@ -94,18 +97,21 @@ const secDeflate = section('/* ========================= DEFLATE 压缩', '/* ==
 const secRelay   = section('/* ========================= 接力码', '/* ========================= 词境工坊');
 const secRealm   = section('/* ========================= 词境工坊', '/* ========================= 分享卡');
 const secPoison  = section('/* ========================= 投毒挑战码', '/* ========================= 双人热座对决');
+const secGrade   = section('function gradeOf(', 'function endRunCore(reason)');   // r18：结算评级纯函数 + 评语表
 
 const loader = new Function('__env',
   'with (__env) {\n' +
   secSave + '\n;__env.xSave = { defaultSave, loadSave, sanitizeSave, numOr, intOr, objOr, arrOr, ownKey, persistNow, persistCancel };\n' +
+  secScene + '\n;__env.xScene = { sceneOf, sceneHookOf, sceneCatOf, syllablesOf, clozeOf, SCENE_CATS, SCENE_MEAN_MATCH, CLOZE_TPL };\n' +
   secConsts + '\n;__env.xConsts = { BOSS_MODS, IV_MIN, DIFFS, setBossMods: function (m) { BOSS_MODS = m; } };\n' +
   secRng + '\n' +
   secAch + '\n;__env.xAch = { ACH, checkAch, unlockAch, masteredCount, addXp, talentRankSum, TALENTS };\n' +
-  secMastery + '\n;__env.xMastery = { updateMastery, getM, bumpToday };\n' +
+  secMastery + '\n;__env.xMastery = { updateMastery, getM, bumpToday, srsGet, srsReview, srsDueList, srsCountToday, srsEndOfToday, srsTierName, startSrsReview, SRS_INTERVAL_DAYS, SRS_STAGE_MAX, SRS_TIERS, SRS_SESSION_MAX };\n' +
   secDeflate + '\n;__env.xDeflate = { WQ_DEFLATE };\n' +
   secRelay + '\n;__env.xRelay = { RELAY_TEXT_PREFIX, RELAY_QR_MAX_URL, relayBuildPayload, relayParsePayload, relayBuildCode, relayTextToPayload, relayPlanShards, relayShardPayload, relayAcceptShard, relayPartsLoad, relayPartsClear, wqB64Enc, wqB64Dec, wqUtf8Enc, wqUtf8Dec, relaySanitizeSnapshot };\n' +
   secRealm + '\n;__env.xRealm = { REALM_TEXT_PREFIX, REALM_MAX_WORDS, sanitizeRealm, realmBuildPayload, realmParsePayload, realmBuildCode, realmTextToPayload, realmDraftBuild, realmCollectDraft, realmSampleSources, realmParseCustom };\n' +
   secPoison + '\n;__env.xPoison = { POISON_CHARS, pValidate, pChecksum, buildEnc, buildPoisonCode, decodePoisonCode, buildResultCode, decodeResultCode, encWords: function(){ return ENC_WORDS; }, encIndex: function(){ return ENC_INDEX; }, markPoisonSetPending, logPoison };\n' +
+  secGrade + '\n;__env.xGrade = { gradeOf, GRADE_CAPS };\n' +
   '\n__env.xState = { getSave: function(){ return save; }, setRun: function(r){ run = r; }, getRun: function(){ return run; } };\n}');
 
 try { loader(env); } catch (e) {
@@ -116,6 +122,9 @@ const { sanitizeSave, defaultSave, numOr } = env.xSave;
 const { BOSS_MODS, IV_MIN } = env.xConsts;
 const { ACH, checkAch } = env.xAch;
 const { updateMastery, getM } = env.xMastery;
+const X = env.xScene;                     // r17：词景/音节/例句
+const { srsGet, srsReview, srsDueList, srsCountToday, srsEndOfToday, srsTierName, startSrsReview,
+  SRS_INTERVAL_DAYS, SRS_STAGE_MAX, SRS_TIERS, SRS_SESSION_MAX } = env.xMastery;
 const { WQ_DEFLATE } = env.xDeflate;
 const R = env.xRelay;
 const RM = env.xRealm;
@@ -269,6 +278,150 @@ console.log('---- C. SRS 排程 ----');
   T('C12 lv2→3 答对 due ≈ now + IV_MIN[3](720min)×2.05（ease 先 +0.05 再计 due）', Math.abs(save.mastery.abstract.due - (t2 + 720 * 60000 * 2.05)) < 2000,
     save.mastery.abstract.due - t2);
   T('C13 getM 自动建档（缺词懒创建全零结构）', (function () { const g = getM('zzfreshword'); return g.lv === 0 && g.seen === 0 && g.ease === undefined; })());
+})();
+
+/* ================= H. 间隔重复排程（r17：SM-2 lite 新词→1天→3天→7天→成熟） ================= */
+console.log('---- H. 间隔重复排程（r17） ----');
+(function () {
+  const save = env.xState.getSave();
+  const DAY = 864e5;
+  T('H0 档位表：SRS_TIERS 5 档 / 间隔日阶梯 [1,3,7,30] / 上限 4',
+    JSON.stringify(SRS_TIERS) === JSON.stringify(['新词', '1 天', '3 天', '7 天', '成熟']) &&
+    JSON.stringify(SRS_INTERVAL_DAYS) === JSON.stringify([1, 3, 7, 30]) && SRS_STAGE_MAX === 4,
+    JSON.stringify({ SRS_TIERS, SRS_INTERVAL_DAYS, SRS_STAGE_MAX }));
+
+  /* 晋升链：新词→1天→3天→7天→成熟，逐档答对核对档位与下次到期 */
+  const w = 'abandon';
+  save.srs = {}; save.mastery[w] = undefined; delete save.mastery[w];
+  let t0 = Date.now();
+  updateMastery(w, true, false);            // 生词首答对 → 入学（新词档）并晋升 1 天档
+  let e = srsGet(w);
+  T('H1 生词首答对：入学 st=1（新词→1天档）', e.st === 1 && e.ok === 1 && e.wrong === 0, JSON.stringify(e));
+  T('H2 due ≈ now + 1 天', Math.abs(e.due - (t0 + 1 * DAY)) < 2000, e.due - t0);
+
+  updateMastery(w, true, false);            // 1 天档答对 → 3 天档
+  t0 = Date.now(); e = srsGet(w);
+  T('H3 1天档答对晋升 st=2 / due ≈ +3 天', e.st === 2 && Math.abs(e.due - (t0 + 3 * DAY)) < 2000, JSON.stringify({ st: e.st, d: e.due - t0 }));
+
+  updateMastery(w, true, false);            // 3 天档答对 → 7 天档
+  t0 = Date.now(); e = srsGet(w);
+  T('H4 3天档答对晋升 st=3 / due ≈ +7 天', e.st === 3 && Math.abs(e.due - (t0 + 7 * DAY)) < 2000, JSON.stringify({ st: e.st, d: e.due - t0 }));
+
+  updateMastery(w, true, false);            // 7 天档答对 → 成熟
+  t0 = Date.now(); e = srsGet(w);
+  T('H5 7天档答对晋升 st=4 成熟 / due ≈ +30 天', e.st === 4 && Math.abs(e.due - (t0 + 30 * DAY)) < 2000, JSON.stringify({ st: e.st, d: e.due - t0 }));
+
+  updateMastery(w, true, false);            // 成熟档答对 → 维持成熟（30 天回归）
+  t0 = Date.now(); e = srsGet(w);
+  T('H6 成熟档答对维持 st=4 / due ≈ +30 天', e.st === 4 && Math.abs(e.due - (t0 + 30 * DAY)) < 2000, JSON.stringify({ st: e.st, d: e.due - t0 }));
+
+  /* 降档：答错退一档并立即到期（今日重学） */
+  updateMastery(w, false, false);           // 成熟答错 → 7 天档 + 立即到期
+  e = srsGet(w);
+  T('H7 成熟答错降档 st=3 / due=now（立即到期）', e.st === 3 && e.due <= Date.now() && e.wrong === 1, JSON.stringify({ st: e.st, d: e.due - Date.now(), wrong: e.wrong }));
+  updateMastery(w, false, false);
+  e = srsGet(w);
+  T('H8 连错继续降档 st=2', e.st === 2, e.st);
+
+  const w2 = 'ability';
+  save.srs[w2] = { st: 0, due: 0, ok: 0, wrong: 0, t: 0 };   // 新词档
+  updateMastery(w2, false, false);
+  T('H9 新词档答错维持 st=0 / due=now', srsGet(w2).st === 0 && srsGet(w2).due <= Date.now(), JSON.stringify(srsGet(w2)));
+
+  T('H10 srsTierName 边界（负数/超界夹取）', srsTierName(-2) === '新词' && srsTierName(9) === '成熟' && srsTierName(2) === '3 天');
+  T('H11 due<=0 的词条不进到期队列', (function () {
+    save.srs.zzw0 = { st: 0, due: 0, ok: 0, wrong: 0, t: 0 };
+    return srsDueList().every(x => x.w !== 'zzw0');
+  })());
+
+  /* 到期队列：今日边界 + 最逾期优先排序（词条须为词典内词，经 meaningOfAny 过滤） */
+  save.srs = {};
+  const endToday = srsEndOfToday();
+  save.srs.abandon = { st: 1, due: Date.now() - 3 * DAY, ok: 1, wrong: 0, t: 0 };    // 最逾期
+  save.srs.absorb = { st: 2, due: Date.now() - 1 * DAY, ok: 2, wrong: 1, t: 0 };
+  save.srs.access = { st: 0, due: endToday - 60000, ok: 0, wrong: 0, t: 0 };         // 今天 23:59 前到期
+  save.srs.accent = { st: 1, due: endToday + 60000, ok: 0, wrong: 0, t: 0 };         // 明天才到期
+  save.srs.account = { st: 4, due: Date.now() + 20 * DAY, ok: 5, wrong: 0, t: 0 };   // 远期成熟
+  save.srs.ghostword = { st: 1, due: Date.now() - DAY, ok: 1, wrong: 0, t: 0 };      // 非词典词
+  const list = srsDueList();
+  T('H12 队列只收 due≤今天结束 的词典内词（3 个；明天的/远期成熟/非词典词不入队）',
+    list.length === 3 && !list.some(x => x.w === 'accent' || x.w === 'ghostword' || x.w === 'account'),
+    JSON.stringify(list.map(x => x.w)));
+  T('H13 最逾期优先排序', list[0].w === 'abandon' && list[1].w === 'absorb', JSON.stringify(list.map(x => x.w)));
+  T('H14 今日晚到期的词计入「今日待复习」（srsEndOfToday 边界）', srsCountToday() === 3, srsCountToday());
+  T('H15 队列词条带释义与档位', list[0].m.indexOf('放弃') >= 0 && typeof list[0].st === 'number', JSON.stringify(list[0]));
+
+  /* 存档清洗：srs 白名单 */
+  const s1 = sanitizeSave({ srs: { abandon: { st: 9, due: 1e18, ok: -3, wrong: 'x', t: 1e18 }, ability: 'junk', absorb: null, accelerate: { st: 2, due: 123, ok: 4, wrong: 1, t: 5 }, __proto__: { st: 9 } } });
+  T('H16 st 夹取 [0,4] / due 夹取时间戳上限 / 负数夹 0', s1.srs.abandon.st === 4 && s1.srs.abandon.due === 8.64e15 && s1.srs.abandon.ok === 0 && s1.srs.abandon.wrong === 0, JSON.stringify(s1.srs.abandon));
+  T('H17 脏字符串/null 词条丢弃 / 合法词条保留', s1.srs.ability === undefined && s1.srs.absorb === undefined && s1.srs.accelerate.st === 2 && s1.srs.accelerate.due === 123, JSON.stringify(Object.keys(s1.srs)));
+  const protoT = {};
+  T('H18 __proto__ 原型污染拦截', !Object.prototype.hasOwnProperty.call(s1.srs, '__proto__') && protoT.polluted === undefined);
+
+  /* 向后兼容：旧档无 srs 字段 */
+  const s2 = sanitizeSave({ coins: 55, mastery: { abandon: { lv: 2, seen: 5 } } });
+  T('H19 旧档缺 srs 字段 → 空对象补全（旧玩家进度无损）', s2.coins === 55 && typeof s2.srs === 'object' && Object.keys(s2.srs).length === 0, JSON.stringify(s2.srs));
+  const ls = env.localStorage;
+  ls.setItem('wq_save_v1', JSON.stringify({ coins: 9, mastery: { abandon: { lv: 1, seen: 1 } } }));
+  const loaded = env.xSave.loadSave();
+  T('H20a 旧档 loadSave 产出 srs 空对象（引擎可即时使用）', typeof loaded.srs === 'object' && Object.keys(loaded.srs).length === 0, JSON.stringify(loaded.srs));
+  save.srs = {};   /* 模拟旧档刚载入：排程为空，首次作答应自动入学 */
+  updateMastery('abstract', true, false);
+  T('H20b 旧档首次作答自动入学（updateMastery → srsReview）', srsGet('abstract').st === 1 && srsGet('abstract').ok === 1, JSON.stringify(srsGet('abstract')));
+  ls.removeItem('wq_save_v1');
+
+  /* 空态与发起入口 */
+  save.srs = {};
+  const startedEmpty = startSrsReview();
+  T('H21 无到期词 startSrsReview 返回 false（空态文案走 toast）', startedEmpty === false && toasts.some(t => t.indexOf('今天没有到期') >= 0), JSON.stringify(toasts.slice(-2)));
+  save.srs.abandon = { st: 0, due: Date.now() - DAY, ok: 0, wrong: 0, t: 0 };
+  save.srs.absorb = { st: 1, due: Date.now() - DAY, ok: 1, wrong: 0, t: 0 };
+  const started = startSrsReview();
+  T('H22 有到期词发起复习返回 true', started === true, String(started));
+  T('H23 会话上限常量 SRS_SESSION_MAX=20', SRS_SESSION_MAX === 20, SRS_SESSION_MAX);
+  save.srs = {};
+})();
+
+/* ================= I. 词景 / 音节拆分 / 例句填空（r17 记忆画像素材） ================= */
+console.log('---- I. 词景/音节/例句（r17） ----');
+(function () {
+  T('I1 SCENE_CATS ≥6 类（实际 ' + X.SCENE_CATS.length + '）', X.SCENE_CATS.length >= 6, X.SCENE_CATS.length);
+  T('I2 每类显式映射 ≥10 条', X.SCENE_CATS.every(c => Object.keys(c.words).length >= 10),
+    JSON.stringify(X.SCENE_CATS.map(c => c.id + ':' + Object.keys(c.words).length)));
+  T('I3 每类带联想钩子短语', X.SCENE_CATS.every(c => typeof c.hook === 'string' && c.hook.length >= 4));
+  T('I4 显式词景 2-3 元素组合', ['castle', 'bat', 'anxiety', 'leap', 'castle'].every(w => {
+    const s = X.sceneOf(w); return s && s.length >= 2 && [...s].length >= 2 && [...s].length <= 3;
+  }), X.sceneOf('castle'));
+  T('I5 EMOJI_OF 派生词景 2 元素（theory）', (function () {
+    const s = X.sceneOf('theory'); return typeof s === 'string' && s.indexOf('💡') === 0 && [...s].length === 2;
+  })(), X.sceneOf('theory'));
+  T('I6 抽象词无词景返回空串（ability）', X.sceneOf('ability') === '', JSON.stringify(X.sceneOf('ability')));
+  T('I7 词景稳定（sceneMemo 两次一致）', X.sceneOf('stable-check') === X.sceneOf('stable-check') || X.sceneOf('castle') === X.sceneOf('castle'));
+  T('I8 词景映射表词条都在词典内（覆盖统计口径）', (function () {
+    const dict = new Set(env.ALL_WORDS.map(x => x.w));
+    const stray = [];
+    X.SCENE_CATS.forEach(c => Object.keys(c.words).forEach(w => { if (!dict.has(w)) stray.push(w); }));
+    return stray.length === 0;
+  })(), '存在词典外词条');
+
+  T('I9 音节拆分 monster→mon·ster', X.syllablesOf('monster') === 'mon·ster', X.syllablesOf('monster'));
+  T('I10 音节拆分 elephant→e·le·phant / family→fa·mi·ly', X.syllablesOf('elephant') === 'e·le·phant' && X.syllablesOf('family') === 'fa·mi·ly',
+    X.syllablesOf('elephant') + ' / ' + X.syllablesOf('family'));
+  T('I11 半元音 y：beyond→be·yond / happy→hap·py / study→stu·dy / deny→de·ny',
+    X.syllablesOf('beyond') === 'be·yond' && X.syllablesOf('happy') === 'hap·py' && X.syllablesOf('study') === 'stu·dy' && X.syllablesOf('deny') === 'de·ny',
+    [X.syllablesOf('beyond'), X.syllablesOf('happy'), X.syllablesOf('study'), X.syllablesOf('deny')].join('/'));
+  T('I12 单音节/不发音 e：make、house、day 返回空串（无需拆）', X.syllablesOf('make') === '' && X.syllablesOf('house') === '' && X.syllablesOf('day') === '',
+    [X.syllablesOf('make'), X.syllablesOf('house'), X.syllablesOf('day')].join('/'));
+  T('I13 拆分覆盖全部字母（拼写不失真：language/important/professor）', ['language', 'important', 'professor'].every(w => {
+    const s = X.syllablesOf(w); return s && s.split('·').join('') === w;
+  }));
+  T('I14 非法输入返回空串', X.syllablesOf('ab') === '' && X.syllablesOf('ab3x') === '' && X.syllablesOf('') === '' && X.syllablesOf(null) === '');
+
+  const cz = X.clozeOf('abandon');
+  T('I15 例句含挖空位 ____', cz.indexOf('____') >= 0, cz);
+  T('I16 例句按词性选模板（动词 abandon 用 v 模板）', X.CLOZE_TPL.v.indexOf(cz) >= 0, cz);
+  T('I17 例句稳定（同词两次一致）', X.clozeOf('abandon') === cz);
+  T('I18 无词性标注词走 any 模板兜底', X.CLOZE_TPL.any.indexOf(X.clozeOf('zzznotaword')) >= 0, X.clozeOf('zzznotaword'));
 })();
 
 /* ================= D. 挑战码 / 成绩码（整合自 src-check/poison-codec-test.js 场景 1-10） ================= */
@@ -776,6 +929,21 @@ console.log('---- G. 存档迁移矩阵 ----');
 
   LS.removeItem('wq_save_v1');
 })();
+
+/* ================= J. 结算评级 gradeOf（r18：S/A/B/C + 撤退封顶） ================= */
+console.log('---- J. 结算评级 gradeOf（r18） ----');
+const gradeOf = env.xGrade.gradeOf;
+T('J1 全对 ≥5 题 = S（复习全对局）', gradeOf(10, 10, 0, 'done') === 'S');
+T('J2 恰好 5 题全对 = S（下限收口）', gradeOf(5, 5, 0, 'done') === 'S');
+T('J3 4 题全对（<5）= A（不足 S 量级）', gradeOf(4, 4, 0, 'done') === 'A');
+T('J4 正确率 90% = A', gradeOf(10, 9, 1, 'done') === 'A');
+T('J5 正确率 80% = B', gradeOf(10, 8, 2, 'done') === 'B');
+T('J6 正确率 60% = C', gradeOf(10, 6, 4, 'done') === 'C');
+T('J7 撤退局全对封顶 B（半途而废不授 S）', gradeOf(10, 10, 0, 'quit') === 'B');
+T('J8 撤退局 90% 封顶 B', gradeOf(10, 9, 1, 'quit') === 'B');
+T('J9 撤退局 60% 保持 C（封顶不提升）', gradeOf(10, 6, 4, 'quit') === 'C');
+T('J10 0 题不给评级（空局无徽章）', gradeOf(0, 0, 0, 'done') === '');
+T('J11 评语表四档齐全', ['S', 'A', 'B', 'C'].every(function (g) { return typeof env.xGrade.GRADE_CAPS[g] === 'string' && env.xGrade.GRADE_CAPS[g].length > 0; }));
 
 /* ================= 汇总 ================= */
 console.log('========================================');
