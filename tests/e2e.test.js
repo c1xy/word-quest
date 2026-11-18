@@ -23,6 +23,14 @@
      S15 连局压测（r16：同一页面不重载连打 10 局完整对局——主线/远征/肉鸽/听写/热座各
          2 局混排，每局结算/收官后回主页；断言全程零 pageerror + 每局回主页 + JS heap
          增长 ≤8MB（每局 CDP 强制 GC 后采样 performance.memory，S15-HEAP 行入基线））
+     S16 间隔重复与记忆画像（r17：SM-2 lite 排程计算/晋升降档/到期队列与空态/复习会话
+         落盘/记忆画像三行+例句填空展开/结算三词卡/词景覆盖率统计（SCENE-STATS 行）/
+         题面词景显示规则与防泄题/连击里程碑单词串 fx；r18：晋升/降档 chips 改按
+         「局首档→收局档」净变化计数——先错后对计晋升、连错两次计降档）
+     S17 r18 特效状态机（答对金色粒子迸发 .fx-gold、连击边缘光晕 combo-glow 与
+         combo-heat 档位同步、BOSS 出场 boss-enter/名牌压入与受击表情帧 .hit-face
+         430ms 回正、背景分层视差 .bg-far+.deco-layer 双层 translate3d、结算评级
+         grade-S/A/B 徽章与 S 级 120 粒撒花/B 级不撒花）
      S-PERF 性能预算（本地服务：主页加载 ≤3s、首次可交互 ≤5s、JS heap 采样入 PERF-BASELINE 行）
    依赖：playwright 或 playwright-core（找不到时整组 SKIP，退出码 0 并说明原因），
    浏览器可执行文件依次探测 playwright 自带 chromium → 环境变量 WQ_CHROME_PATH →
@@ -268,6 +276,25 @@ async function battleSpell(page, words) {
     if (!done) return 'stuck';
   }
   return 'ok';
+}
+/* 换种子存档：先取消游戏挂起的防抖写盘（persistCancel），再覆写 wq_save_v1 并 reload——
+   否则 pagehide 的 persistFlush（丢档窗口为零的兜底）会把旧档盖回种子（S16 首跑实测踩坑） */
+async function reseedSave(page, seed) {
+  await page.evaluate(s => {
+    if (typeof persistCancel === 'function') persistCancel();
+    localStorage.setItem('wq_save_v1', JSON.stringify(s));
+  }, seed);
+  await page.reload({ waitUntil: 'load' });
+}
+/* 撤退或已结算：局若已自然结束（如 review 队列打满自动收官），直接进结算 */
+async function quitOrSettled(page) {
+  const st = await page.evaluate(() => ({
+    result: document.getElementById('scr-result').classList.contains('active'),
+    battle: document.getElementById('scr-battle').classList.contains('active'),
+    ended: (typeof run !== 'undefined' && run) ? !!run.ended : true
+  }));
+  if (st.result) return;
+  await quitBattle(page);
 }
 /* 结算页结构断言 */
 async function assertResult(page, label, wantTitle, wantChipPart) {
@@ -1801,6 +1828,582 @@ if (!resolvable) {
           skip('S15 JS heap 增长 ≤8MB', 'performance.memory 不可得（samples=' + JSON.stringify(heaps15) + '）');
         }
         await c15.context.close();
+      }
+
+      /* ============ S16 · 间隔重复与记忆画像（r17 新增维度） ============
+         A 排程计算：页内真实 srsReview 走「新词→1天→3天→7天→成熟」晋升链与答错降档
+         B 到期队列：空态文案（无到期不空开局）/ 主页入口计数 / 明天才到期与远期成熟不入队
+         C 复习会话：答对晋升+落盘（st/due 写回 localStorage）/ 答错降档+立即到期 /
+           复习完成结算（晋升·降档 chips）
+         D 记忆画像：词根拆解行 / 无词根词音节兜底 / 联想一行 / 例句填空（首字母提示
+           aria-expanded 展开 → 揭晓换真词）
+         E 结算三词卡：错词入选，点击直达记忆画像
+         F 词景：映射 ≥6 类且每类 ≥10 条 / 全库覆盖率统计（SCENE-STATS 基线行）/
+           题面仅词面暴露题型显示（e2c）且内容与 sceneOf 一致 / c2e 防泄题不显示
+         G 连击 5 里程碑 fx 显示所连单词串（🔗 5 连击：… 与 run.comboWords 一致） */
+      console.log('---- S16 间隔重复与记忆画像（r17） ----');
+      {
+        /* ---------- A. 排程计算：晋升链 / 降档（页内真实函数） ---------- */
+        const c16a = await newContext(browser);
+        {
+          const page = c16a.page;
+          const errorsA = [];
+          page.on('pageerror', e => errorsA.push(e.message));
+          await gotoHome(page);
+          const chain = await page.evaluate(() => {
+            const DAY = 864e5, out = [];
+            const snap = w => { const e = (JSON.parse(JSON.stringify(save.srs)))[w]; return e; };
+            srsReview('abandon', true);   // 生词首答对 → 1 天档
+            let t = Date.now(), e = snap('abandon');
+            out.push({ k: 'st1', st: e.st, dt: e.due - t });
+            srsReview('abandon', true); t = Date.now(); e = snap('abandon');   // → 3 天档
+            out.push({ k: 'st2', st: e.st, dt: e.due - t });
+            srsReview('abandon', true); t = Date.now(); e = snap('abandon');   // → 7 天档
+            out.push({ k: 'st3', st: e.st, dt: e.due - t });
+            srsReview('abandon', true); t = Date.now(); e = snap('abandon');   // → 成熟
+            out.push({ k: 'st4', st: e.st, dt: e.due - t });
+            srsReview('abandon', true); t = Date.now(); e = snap('abandon');   // 成熟维持
+            out.push({ k: 'st4b', st: e.st, dt: e.due - t });
+            srsReview('abandon', false); e = snap('abandon');                  // 答错降档
+            out.push({ k: 'down', st: e.st, dueNow: e.due <= Date.now() });
+            srsReview('ability', false); const e2 = snap('ability');           // 新词答错维持新词
+            out.push({ k: 'down0', st: e2.st, dueNow: e2.due <= Date.now() });
+            out.push({ k: 'iv', iv: JSON.parse(JSON.stringify(SRS_INTERVAL_DAYS)), max: SRS_STAGE_MAX });
+            return out;
+          });
+          ok('S16-A 档位阶梯常量 [1,3,7,30] / 上限 4', JSON.stringify(chain[7].iv) === '[1,3,7,30]' && chain[7].max === 4, JSON.stringify(chain[7].iv) + '/' + chain[7].max);
+          ok('S16-A 生词答对 → 1 天档（due≈+1 天）', chain[0].st === 1 && Math.abs(chain[0].dt - 864e5) < 3000, JSON.stringify(chain[0]));
+          ok('S16-A 1天档答对 → 3 天档（due≈+3 天）', chain[1].st === 2 && Math.abs(chain[1].dt - 3 * 864e5) < 3000, JSON.stringify(chain[1]));
+          ok('S16-A 3天档答对 → 7 天档（due≈+7 天）', chain[2].st === 3 && Math.abs(chain[2].dt - 7 * 864e5) < 3000, JSON.stringify(chain[2]));
+          ok('S16-A 7天档答对 → 成熟（due≈+30 天）', chain[3].st === 4 && Math.abs(chain[3].dt - 30 * 864e5) < 3000, JSON.stringify(chain[3]));
+          ok('S16-A 成熟档答对维持成熟（30 天回归）', chain[4].st === 4 && Math.abs(chain[4].dt - 30 * 864e5) < 3000, JSON.stringify(chain[4]));
+          ok('S16-A 答错降档且立即到期', chain[5].st === 3 && chain[5].dueNow, JSON.stringify(chain[5]));
+          ok('S16-A 新词答错维持新词档', chain[6].st === 0 && chain[6].dueNow, JSON.stringify(chain[6]));
+          ok('S16-A 排程零页面异常', errorsA.length === 0, errorsA.join(' | '));
+        }
+        await c16a.context.close();
+
+        /* ---------- B. 空态：无到期词 → 明确空态文案，不空开局 ---------- */
+        const c16b = await newContext(browser);
+        {
+          const page = c16b.page;
+          await gotoHome(page);
+          const emptySub = await page.textContent('#srs-sub');
+          ok('S16-B 无到期词入口空态文案（今日没有到期词…）', emptySub.indexOf('今日没有到期词') >= 0, emptySub);
+          await page.click('#btn-srs-review');
+          await sleep(500);
+          const after = await page.evaluate(() => ({
+            home: document.getElementById('scr-home').classList.contains('active'),
+            battle: document.getElementById('scr-battle').classList.contains('active'),
+            toast: (document.querySelector('#toast-wrap .toast:last-child') || {}).textContent || ''
+          }));
+          ok('S16-B 点击后仍留主页（不空开局）', after.home && !after.battle, JSON.stringify(after));
+          ok('S16-B 空态 toast 提示', after.toast.indexOf('今天没有到期') >= 0, after.toast);
+        }
+        await c16b.context.close();
+
+        /* ---------- B2+C. 到期队列入口 → 复习会话：答对晋升/答错降档并落盘 ----------
+           r18 口径回归（遗留池）：absorb 种子为「新词档 st=0」——答错（新词维持 0 档）
+           后立即重考答对 → 实际晋升 0→1，结算 chips 必须计入 ⬆️晋升（旧口径按
+           「有答错=降档」把它错记成 ⬇️）；ability 种子 st=2 连错两次 → 实际降档 ⬇️。 */
+        const seedSrs = baseSave();
+        seedSrs.settings = { choiceOnlyMigrated: true, c2eOnlyMigrated: true, bgmOffMigrated: true,
+          qtypes: { c2e: true, e2c: false, spell: false, listen: false } };
+        const DAY_MS = 864e5;
+        seedSrs.srs = {
+          abandon: { st: 1, due: Date.now() - 3 * DAY_MS, ok: 1, wrong: 0, t: Date.now() },   // 最逾期
+          absorb: { st: 0, due: Date.now() - 1 * DAY_MS, ok: 0, wrong: 1, t: Date.now() },   // 新词档：先错后对 → 晋升
+          ability: { st: 2, due: Date.now() - 12 * 3600e3, ok: 2, wrong: 0, t: Date.now() }, // 1天档：连错两次 → 降档
+          accent: { st: 1, due: Date.now() + 36 * 3600e3, ok: 1, wrong: 0, t: Date.now() },   // 36h 后=明天才到期 → 不计入今日
+          account: { st: 4, due: Date.now() + 20 * DAY_MS, ok: 5, wrong: 0, t: Date.now() }   // 成熟远期 → 不计入
+        };
+        const c16c = await newContext(browser, seedSrs);
+        {
+          const page = c16c.page;
+          const errorsC = [];
+          page.on('pageerror', e => errorsC.push(e.message));
+          await gotoHome(page);
+          const sub = await page.textContent('#srs-sub');
+          ok('S16-B2 入口计数「今日到期 3 词」（明天的 accent / 远期 account 不计）',
+            sub.indexOf('今日到期 3 词') >= 0, sub);
+          await page.click('#btn-srs-review');
+          await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+          await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q, { timeout: 15000 });
+          const sess0 = await page.evaluate(() => ({ mode: run.mode, total: run.reviewTotal, word: run.q.word.w,
+            banner: document.getElementById('banner-box').textContent }));
+          ok('S16-C 会话 mode=srs / 词队列=3', sess0.mode === 'srs' && sess0.total === 3, JSON.stringify(sess0));
+          ok('S16-C 横幅为「今日待复习 · 答对晋升/答错降档」',
+            sess0.banner.indexOf('今日待复习') >= 0 && sess0.banner.indexOf('答对晋升') >= 0 && sess0.banner.indexOf('不扣血') >= 0, sess0.banner);
+          ok('S16-C 队列最逾期优先（第 1 词=abandon）', sess0.word === 'abandon', sess0.word);
+
+          /* 答对 abandon：st 1→2，due≈+3 天，并已落盘（localStorage 读档核对） */
+          await battleChoice(page, 1);
+          await sleep(500);
+          const savedUp = await page.evaluate(() => JSON.parse(localStorage.getItem('wq_save_v1')).srs.abandon);
+          ok('S16-C 答对晋升落盘：abandon st 1→2', savedUp.st === 2, JSON.stringify(savedUp));
+          ok('S16-C 答对排程落盘：due≈now+3 天', Math.abs(savedUp.due - (Date.now() + 3 * 864e5)) < 5000, savedUp.due - Date.now());
+
+          /* 答错 absorb（新词档 st=0）：维持 0 档且 due≤now（记忆卡弹出即已落盘）→ 重考答对晋升 1 */
+          await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && run.q.word.w === 'absorb', { timeout: 15000 });
+          await answerWrongOnce(page);
+          await page.waitForSelector('#memcard:not([hidden])', { timeout: 8000 });
+          const savedDown = await page.evaluate(() => JSON.parse(localStorage.getItem('wq_save_v1')).srs.absorb);
+          ok('S16-C 新词答错维持新词档（st 0→0）且立即到期', savedDown.st === 0 && savedDown.due <= Date.now(), JSON.stringify(savedDown));
+          await page.click('#mem-ok');
+          await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked, { timeout: 15000 });
+          const retryWord = await page.evaluate(() => run.q.word.w);
+          ok('S16-C 答错后同词重考（absorb）', retryWord === 'absorb', retryWord);
+          await battleChoice(page, 1);
+          await sleep(500);
+          const savedRetry = await page.evaluate(() => JSON.parse(localStorage.getItem('wq_save_v1')).srs.absorb);
+          ok('S16-C 先错后对（新词档）实际晋升 st 0→1（r18 口径：同词先错后对不再错记为降档）', savedRetry.st === 1, JSON.stringify(savedRetry));
+
+          /* 答错 ability 两次（1天档）：降档路径——重考再错 → 复仇/重出题链自动续打至结算 */
+          await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && run.q.word.w === 'ability', { timeout: 20000 });
+          await answerWrongOnce(page);
+          await page.waitForSelector('#memcard:not([hidden])', { timeout: 8000 });
+          const savedAbility1 = await page.evaluate(() => JSON.parse(localStorage.getItem('wq_save_v1')).srs.ability);
+          ok('S16-C ability 答错降档 st 2→1', savedAbility1.st === 1, JSON.stringify(savedAbility1));
+          await page.click('#mem-ok');
+          await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked, { timeout: 15000 });
+          await answerWrongOnce(page);
+          await page.waitForSelector('#memcard:not([hidden])', { timeout: 8000 });
+          const savedAbility2 = await page.evaluate(() => JSON.parse(localStorage.getItem('wq_save_v1')).srs.ability);
+          ok('S16-C ability 重考再错再降 st 1→0（低于局首档=真降档）', savedAbility2.st === 0, JSON.stringify(savedAbility2));
+          await page.click('#mem-ok');
+          /* 队列打完 → 池子重出旧词，全自动答对至 kills=3 自动结算（chips 断言） */
+          await battleChoice(page, 'end');
+          await waitResult(page, 20000);
+          await assertResult(page, 'S16-C 复习完成', '🧠 今日待复习完成！', '🧠 复习 3 词');
+          const chips = await page.evaluate(() => Array.from(document.querySelectorAll('#result-stats .chip')).map(c => c.textContent.trim()));
+          ok('S16-C 结算含「⬆️ 晋升 2 词」（abandon 直接答对 + absorb 先错后对）',
+            chips.some(c => c.indexOf('⬆️ 晋升 2') >= 0), JSON.stringify(chips));
+          ok('S16-C 结算含「⬇️ 降档 1 词」（ability 连错两次净降档）',
+            chips.some(c => c.indexOf('⬇️ 降档 1') >= 0), JSON.stringify(chips));
+          ok('S16-C 全程零页面异常', errorsC.length === 0, errorsC.join(' | '));
+
+          /* ---------- E. 结算三词卡：错词入选（错得多靠前），点击直达记忆画像 ---------- */
+          const mem3 = await page.evaluate(() => ({
+            visible: !document.getElementById('mem3-card').hidden,
+            rows: Array.from(document.querySelectorAll('#mem3-list .mem3-row')).map(b => ({
+              w: b.dataset.w,
+              scene: b.querySelector('.mem3-scene').textContent,
+              why: b.querySelector('.mem3-why').textContent
+            })),
+            hint: (document.querySelector('#mem3-card .hint') || {}).textContent || ''
+          }));
+          ok('S16-E 三词卡可见且错词 ability（2 错）/absorb（1 错）入选（2 行）',
+            mem3.visible && mem3.rows.length === 2 && mem3.rows[0].w === 'ability' && mem3.rows[1].w === 'absorb', JSON.stringify(mem3));
+          ok('S16-E 行内标注答错原因（❌ 答错 2 次）', mem3.rows.length && mem3.rows[0].why.indexOf('❌ 答错 2') >= 0, mem3.rows.length ? mem3.rows[0].why : '');
+          await page.click('#mem3-list .mem3-row');
+          await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 5000 });
+          const woFromMem3 = await page.evaluate(() => ({
+            word: document.getElementById('wo-word').textContent,
+            profile: !document.getElementById('wo-profile').hidden
+          }));
+          ok('S16-E 点击三词卡直达记忆画像（首行=错得最多的 ability）', woFromMem3.word.indexOf('ability') >= 0 && woFromMem3.profile, JSON.stringify(woFromMem3));
+          await page.click('#wo-close');
+          await page.click('#btn-result-home');
+          await backHome(page);
+        }
+        await c16c.context.close();
+
+        /* ---------- D. 记忆画像：词根拆解 / 音节兜底 / 例句填空 ---------- */
+        const c16d = await newContext(browser);
+        {
+          const page = c16d.page;
+          const errorsD = [];
+          page.on('pageerror', e => errorsD.push(e.message));
+          await gotoHome(page);
+          await page.click('#btn-codex');
+          await page.waitForSelector('#scr-codex.active', { timeout: 5000 });
+          /* ① 有词根词 transport：🧩 拆解行 + 💡 联想 + ✍️ 例句 + 首字母展开 + 揭晓 */
+          await page.fill('#codex-search', 'transport');
+          await page.waitForSelector('#codex-list .cx-row', { timeout: 5000 });
+          await page.click('#codex-list .cx-row');
+          await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 5000 });
+          const prof1 = await page.evaluate(() => {
+            const rows = Array.from(document.querySelectorAll('#wo-profile .wp-row')).map(r => ({
+              tag: r.querySelector('.wp-tag').textContent,
+              val: r.querySelector('.wp-val').textContent
+            }));
+            return {
+              rows: rows,
+              hintBtn: !!document.getElementById('wo-cloze-hint'),
+              revealBtn: !!document.getElementById('wo-cloze-reveal'),
+              clozeVal: (document.querySelector('.wp-cloze .wp-val') || {}).textContent || ''
+            };
+          });
+          ok('S16-D 记忆画像三行结构（拆解/联想/例句）', prof1.rows.length === 3 &&
+            prof1.rows[0].tag.indexOf('拆解') >= 0 && prof1.rows[1].tag.indexOf('联想') >= 0 && prof1.rows[2].tag.indexOf('例句') >= 0,
+            JSON.stringify(prof1.rows));
+          ok('S16-D transport 拆解行复用词汇密码（含 trans/port）',
+            prof1.rows[0].val.indexOf('trans') >= 0 && prof1.rows[0].val.indexOf('port') >= 0, prof1.rows[0].val);
+          ok('S16-D 联想行带词景或钩子（非空）', prof1.rows[1].val.length >= 4, prof1.rows[1].val);
+          ok('S16-D 例句挖空 ____', prof1.clozeVal.indexOf('____') >= 0, prof1.clozeVal);
+          await page.click('#wo-cloze-hint');
+          const hint1 = await page.evaluate(() => ({
+            expanded: document.getElementById('wo-cloze-hint').getAttribute('aria-expanded'),
+            text: document.getElementById('wo-cloze-hinttext').textContent,
+            visible: !document.getElementById('wo-cloze-hinttext').hidden
+          }));
+          ok('S16-D 首字母提示展开（aria-expanded=true · T·9 字母）',
+            hint1.expanded === 'true' && hint1.visible && /首字母 T/i.test(hint1.text) && hint1.text.indexOf('9') >= 0, JSON.stringify(hint1));
+          await page.click('#wo-cloze-hint');
+          const hint2 = await page.evaluate(() => ({
+            expanded: document.getElementById('wo-cloze-hint').getAttribute('aria-expanded'),
+            hidden: document.getElementById('wo-cloze-hinttext').hidden
+          }));
+          ok('S16-D 提示可收起（aria-expanded=false）', hint2.expanded === 'false' && hint2.hidden, JSON.stringify(hint2));
+          await page.click('#wo-cloze-reveal');
+          const revealed = await page.evaluate(() => (document.querySelector('.wp-cloze .wp-val') || {}).textContent || '');
+          ok('S16-D 揭晓后挖空换真词 transport', revealed.indexOf('transport') >= 0 && revealed.indexOf('____') < 0, revealed);
+          await page.click('#wo-close');
+          /* ② 无词根词 abandon：fallback 音节拆分行 */
+          await page.fill('#codex-search', 'abandon');
+          await page.waitForSelector('#codex-list .cx-row', { timeout: 5000 });
+          await page.click('#codex-list .cx-row');
+          await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 5000 });
+          const prof2 = await page.evaluate(() => {
+            const r0 = document.querySelector('#wo-profile .wp-row');
+            return { tag: r0.querySelector('.wp-tag').textContent, val: r0.querySelector('.wp-val').textContent };
+          });
+          ok('S16-D 无词根词 fallback 音节拆分（abandon → a·ban·don）',
+            prof2.tag.indexOf('音节') >= 0 && prof2.val === 'a·ban·don', JSON.stringify(prof2));
+          ok('S16-D 记忆画像零页面异常', errorsD.length === 0, errorsD.join(' | '));
+          await page.click('#wo-close');
+          await page.click('#btn-codex-back');
+          await backHome(page);
+
+          /* ---------- F. 词景：覆盖率统计 + 题面显示规则 ---------- */
+          const stats = await page.evaluate(() => {
+            const per = SCENE_CATS.map(c => ({ id: c.id, n: Object.keys(c.words).length }));
+            let covered = 0;
+            ALL_WORDS.forEach(it => { if (sceneOf(it.w)) covered++; });
+            return { cats: SCENE_CATS.length, per: per, covered: covered, total: ALL_WORDS.length };
+          });
+          ok('S16-F 词景 ≥6 类（实际 ' + stats.cats + '）', stats.cats >= 6, stats.cats);
+          ok('S16-F 每类显式映射 ≥10 条', stats.per.every(p => p.n >= 10), JSON.stringify(stats.per));
+          ok('S16-F 全库词景覆盖 ≥300 词（' + stats.covered + '/' + stats.total + '）',
+            stats.covered >= 300, stats.covered + '/' + stats.total);
+          /* 基线行（供后续轮次对比覆盖率，勿删除） */
+          console.log('SCENE-STATS ' + JSON.stringify({ covered: stats.covered, total: stats.total,
+            pct: Math.round(stats.covered / stats.total * 1000) / 10, perCat: stats.per }));
+
+          /* 题面规则：e2c-only 局——词面已暴露 → 词景显示且内容与 sceneOf 一致。
+             词池用 8 词景 + 8 非词景的自定义词库（50/50 稳定抽样，避免按内置词库
+             ~10% 词景密度抽 12 题撞不到 2 例的偶然失败）；换种子直接覆写
+             wq_save_v1（wq_seed_done 仍为 '1'，init 脚本不会再盖回） */
+          const seedE2c = baseSave();
+          seedE2c.settings = { choiceOnlyMigrated: true, c2eOnlyMigrated: true, bgmOffMigrated: true,
+            qtypes: { c2e: false, e2c: true, spell: false, listen: false } };
+          seedE2c.customLists = [{ id: 'custom_scene', name: '词景抽样', desc: 'S16 词景抽样', words: [
+            ['castle', 'n. 城堡'], ['insect', 'n. 昆虫'], ['volcano', 'n. 火山'], ['tunnel', 'n. 隧道'],
+            ['beach', 'n. 海滩'], ['anxiety', 'n. 焦虑'], ['leap', 'n. 跳跃 v. 跳'], ['appetite', 'n. 食欲；欲望'],
+            ['ability', 'n. 能力；才能'], ['abandon', 'v. 放弃；抛弃'], ['absorb', 'v. 吸收；吸引'],
+            ['academic', 'adj. 学术的'], ['achieve', 'v. 实现；达到'], ['acquire', 'v. 获得；学到'],
+            ['adequate', 'adj. 充足的'], ['advantage', 'n. 优势']
+          ] }];
+          seedE2c.lastLists = ['custom_scene'];
+          await reseedSave(page, seedE2c);
+          await page.waitForSelector('#scr-home.active', { timeout: 15000 });
+          await page.click('#btn-review');
+          await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+          await page.click('#btn-start');
+          await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+          let withScene = 0, noScene = 0, mismatch = null;
+          for (let i = 0; i < 12 && (withScene < 2 || noScene < 2); i++) {
+            await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked && !run.ended, { timeout: 15000 }).catch(() => {});
+            if (await page.evaluate(() => (typeof run !== 'undefined' && run) ? !!run.ended : true)) break;
+            const chk = await page.evaluate(() => ({
+              word: run.q.word.w,
+              sceneExpected: sceneOf(run.q.word.w),
+              shown: !document.getElementById('q-scene').hidden,
+              content: document.getElementById('q-scene').textContent
+            }));
+            if (chk.sceneExpected) {
+              withScene++;
+              if (!chk.shown || chk.content !== chk.sceneExpected) mismatch = chk;
+            } else {
+              noScene++;
+              if (chk.shown) mismatch = chk;
+            }
+            await clickCorrectOnce(page);
+            await sleep(1150);
+          }
+          ok('S16-F e2c 题面词景显示 ≥2 例且与 sceneOf 一致', withScene >= 2 && !mismatch, JSON.stringify({ withScene, mismatch }));
+          ok('S16-F 无景词题面保持隐藏 ≥2 例', noScene >= 2, JSON.stringify({ noScene }));
+
+          /* c2e 防泄题：词就是答案 → 词景不自动显示 */
+          await quitOrSettled(page);
+          await waitResult(page, 15000);
+          await page.click('#btn-result-home');
+          await backHome(page);
+          const seedC2e = baseSave();
+          seedC2e.settings = { choiceOnlyMigrated: true, c2eOnlyMigrated: true, bgmOffMigrated: true,
+            qtypes: { c2e: true, e2c: false, spell: false, listen: false } };
+          await reseedSave(page, seedC2e);
+          await page.waitForSelector('#scr-home.active', { timeout: 15000 });
+          await page.click('#btn-review');
+          await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+          await page.click('#btn-start');
+          await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+          let shownInC2e = 0, checkedC2e = 0;
+          for (let i = 0; i < 6; i++) {
+            await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked && !run.ended, { timeout: 15000 }).catch(() => {});
+            if (await page.evaluate(() => (typeof run !== 'undefined' && run) ? !!run.ended : true)) break;
+            const chk = await page.evaluate(() => ({ shown: !document.getElementById('q-scene').hidden }));
+            checkedC2e++;
+            if (chk.shown) shownInC2e++;
+            await clickCorrectOnce(page);
+            await sleep(1150);
+          }
+          ok('S16-F c2e 题（词=答案）词景不自动显示，防泄题（' + checkedC2e + ' 题抽检）', shownInC2e === 0, shownInC2e);
+
+          /* ---------- G. 连击 5 里程碑 fx：显示所连单词串 ---------- */
+          await quitOrSettled(page);
+          await waitResult(page, 15000);
+          await page.click('#btn-result-home');
+          await backHome(page);
+          await page.click('#btn-review');
+          await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+          await page.click('#btn-start');
+          await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+          await battleChoice(page, 4);   // 4 连击铺垫（每答对即击杀，连击不中断）
+          let comboFx = null, comboTries = 0;
+          while (comboTries < 6 && !(comboFx && comboFx.text)) {
+            comboTries++;
+            await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked && !run.ended, { timeout: 15000 }).catch(() => {});
+            const comboNow = await page.evaluate(() => (typeof run !== 'undefined' && run && !run.ended) ? run.combo : -1);
+            if (comboNow < 0) break;
+            await clickCorrectOnce(page);
+            if (comboNow === 4) {   // 这一次点击把连击推到 5 → comboBurst → fx 立即出现（存活 1s）
+              comboFx = await page.evaluate(() => {
+                const el = document.querySelector('#fx-layer .fx-dmg.combo-chain');
+                return { text: el ? el.textContent : '', words: (typeof run !== 'undefined' && run) ? run.comboWords.slice() : [] };
+              });
+              break;
+            }
+            await sleep(1150);
+          }
+          ok('S16-G 连击 5 fx 显示单词串（🔗 5 连击：…）',
+            !!comboFx && comboFx.text.indexOf('🔗 5 连击：') === 0 && comboFx.text.indexOf(comboFx.words.join(' · ')) >= 0,
+            JSON.stringify(comboFx));
+          ok('S16-G 单词串 = 本轮连续答对的 5 个词', !!comboFx && comboFx.words.length === 5, JSON.stringify(comboFx && comboFx.words));
+          ok('S16-D/F/G 零页面异常', errorsD.length === 0, errorsD.join(' | '));
+          await quitOrSettled(page);
+          await waitResult(page, 15000);
+          await page.click('#btn-result-home');
+          await backHome(page);
+        }
+        await c16d.context.close();
+      }
+
+      /* ============ S17 · r18 特效状态机 ============
+         A. 答对金色粒子迸发：fx-layer 出现 ≥10 个 .fx-gold，每粒挂 --dx/--dy 位移矢量
+            （纯 transform/opacity 合成动画；关键帧白名单由 S14-C 全局扫描兜底）。
+         B. 连击边缘光晕（与 R15 combo-heat 同档独立成层）：3/6/10 连 →
+            #combo-glow.glow-1/2/3 与 scr-battle.combo-heat-N 同步挂载、回落互斥摘除。
+         C. BOSS 出场/受击表情帧：注入 bossStage 走真实 nextMonster——出场瞬间
+            .boss-enter + boss-live、900ms 后按怪身份摘类；答对 BOSS 一题受击瞬间
+            emoji 切到 BOSS_HIT_FACE 变体 + .hit-face，430ms 后回正。
+         D. 背景分层视差（懒渲染）：主页/战斗各挂 .bg-far 远层 + .deco-layer 近层；
+            指针移动后两层 translate3d 生效，战斗远层随主题换色。 */
+      console.log('---- S17 r18 特效状态机 ----');
+      {
+        const c17 = await newContext(browser, baseSave());
+        const page = c17.page;
+        const errors17 = [];
+        page.on('pageerror', e => errors17.push(e.message));
+        await page.goto(BASE_URL + '/', { waitUntil: 'load' });
+        await page.waitForSelector('#scr-home.active', { timeout: 15000 });
+
+        // A0/D1. 主页视差双层 + 指针驱动
+        const homeLayers = await page.evaluate(() => ({
+          far: !!document.getElementById('home-bg-far'),
+          near: !!document.getElementById('home-deco'),
+          farBg: (getComputedStyle(document.getElementById('home-bg-far')).backgroundImage || '').indexOf('radial-gradient') >= 0
+        }));
+        ok('S17-D 主页双层挂载（.bg-far + .deco-layer）且远层为渐变色块',
+          homeLayers.far && homeLayers.near && homeLayers.farBg, JSON.stringify(homeLayers));
+        await page.mouse.move(90, 90);
+        await page.mouse.move(340, 760, { steps: 6 });
+        await sleep(300);
+        const homeT = await page.evaluate(() => ({
+          far: document.getElementById('home-bg-far').style.transform,
+          near: document.getElementById('home-deco').style.transform
+        }));
+        ok('S17-D 指针驱动视差：far/near 层 translate3d 生效',
+          /^translate3d\(/.test(homeT.far || '') && /^translate3d\(/.test(homeT.near || ''), JSON.stringify(homeT));
+
+        // 进入无尽战斗（一怪一血、无商店，适合连击/粒子链路）
+        await page.click('#btn-endless');
+        await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+        await page.click('#btn-start');
+        await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q, { timeout: 15000 });
+        // D2. 战斗远层随主题着色 + 指针位移
+        const farBattle = await page.evaluate(() => ({
+          theme: (document.getElementById('scr-battle').className.match(/theme-\w+/) || [''])[0],
+          bg: (getComputedStyle(document.getElementById('battle-bg-far')).backgroundImage || '').indexOf('radial-gradient') >= 0
+        }));
+        ok('S17-D 战斗远层存在且随主题（' + farBattle.theme + '）着色', farBattle.bg, JSON.stringify(farBattle));
+        await page.mouse.move(120, 300);
+        await page.mouse.move(330, 620, { steps: 5 });
+        await sleep(260);
+        const farT = await page.evaluate(() => document.getElementById('battle-bg-far').style.transform);
+        ok('S17-D 战斗远层指针位移生效', /^translate3d\(/.test(farT || ''), farT);
+
+        // A/B. 连答至 10 连：金色粒子、glow 档位、热浪同步
+        const READ17 = () => {
+          const r = (typeof run === 'undefined') ? null : run;
+          const mem = document.getElementById('memcard');
+          return {
+            ended: r ? !!r.ended : true,
+            memcard: !!(mem && !mem.hidden && mem.getClientRects().length > 0),
+            locked: !r || !r.q || !!r.q.locked,
+            word: r && r.q && r.q.word ? r.q.word.w : null,
+            meaning: r && r.q && r.q.word ? r.q.word.m : null,
+            qtype: r && r.q ? r.q.type : null,
+            opts: Array.from(document.querySelectorAll('#q-options .q-opt')).map(b => b.textContent.replace(/^[0-9]+/, '').trim())
+          };
+        };
+        let goldSeen = null, glow1 = null, glow2 = null, glow3 = null, comboN = 0;
+        for (let i = 0; i < 26 && comboN < 10; i++) {
+          const st = await page.evaluate(READ17);
+          if (st.ended) break;
+          if (st.memcard) { await page.click('#mem-ok').catch(() => {}); await sleep(280); continue; }
+          if (st.locked) { await sleep(300); continue; }
+          const want = st.qtype === 'e2c' ? st.meaning : st.word;
+          const idx = st.opts.findIndex(o => o === want);
+          if (idx < 0) { await sleep(350); continue; }
+          await page.click('#q-options .q-opt >> nth=' + idx);
+          if (i === 0) {
+            await sleep(240);   // heroAttackFx 命中拍在 180ms 后
+            goldSeen = await page.evaluate(() => {
+              const g = Array.from(document.querySelectorAll('#fx-layer .fx-gold'));
+              return {
+                n: g.length,
+                vec: g.slice(0, 3).every(x => /px$/.test(x.style.getPropertyValue('--dx') || ''))
+              };
+            });
+          }
+          if (i === 2) glow1 = await page.evaluate(() => ({
+            g: document.getElementById('combo-glow').classList.contains('glow-1'),
+            h: document.getElementById('scr-battle').classList.contains('combo-heat-1')
+          }));
+          if (i === 5) glow2 = await page.evaluate(() => ({
+            g2: document.getElementById('combo-glow').classList.contains('glow-2'),
+            g1off: !document.getElementById('combo-glow').classList.contains('glow-1'),
+            h2: document.getElementById('scr-battle').classList.contains('combo-heat-2')
+          }));
+          if (i === 9) glow3 = await page.evaluate(() => ({
+            g3: document.getElementById('combo-glow').classList.contains('glow-3'),
+            h3: document.getElementById('scr-battle').classList.contains('combo-heat-3')
+          }));
+          comboN = await page.evaluate(() => run.combo);
+          await sleep(1050);
+        }
+        ok('S17-A 答对金色粒子迸发（≥10 粒且带 --dx 位移矢量）', !!goldSeen && goldSeen.n >= 10 && goldSeen.vec, JSON.stringify(goldSeen));
+        ok('S17-B 3 连：combo-glow.glow-1 与 combo-heat-1 同步', !!glow1 && glow1.g && glow1.h, JSON.stringify(glow1));
+        ok('S17-B 6 连：glow-2 抬升且 glow-1 摘除（与 combo-heat-2 同步）', !!glow2 && glow2.g2 && glow2.g1off && glow2.h2, JSON.stringify(glow2));
+        ok('S17-B 10 连：glow-3 满档（与 combo-heat-3 同步）', !!glow3 && glow3.g3 && glow3.h3, JSON.stringify(glow3));
+        ok('S17-B 连击 ≥10 累计达成', comboN >= 10, 'combo=' + comboN);
+
+        // C. BOSS 出场 + 受击表情帧（注入 bossStage 走真实 nextMonster）
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked, { timeout: 15000 });
+        const bossSpawn = await page.evaluate(() => {
+          run.bossStage = true;
+          nextMonster();
+          return {
+            emoji: run.monster && run.monster.emoji,
+            enter: document.getElementById('monster-emoji').classList.contains('boss-enter'),
+            live: document.getElementById('scr-battle').classList.contains('boss-live'),
+            nameAnim: getComputedStyle(document.getElementById('monster-name')).animationName
+          };
+        });
+        ok('S17-C BOSS 出场：boss-enter + boss-live + 名牌压入动画', bossSpawn.enter && bossSpawn.live &&
+          bossSpawn.nameAnim.indexOf('bossNameIn') >= 0, JSON.stringify(bossSpawn));
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked, { timeout: 15000 });
+        await sleep(950);
+        const enterGone = await page.evaluate(() => !document.getElementById('monster-emoji').classList.contains('boss-enter'));
+        ok('S17-C 出场动画按怪身份收尾（900ms 后 boss-enter 摘类）', enterGone, 'removed=' + enterGone);
+        const stBoss = await page.evaluate(READ17);
+        const wantBoss = stBoss.qtype === 'e2c' ? stBoss.meaning : stBoss.word;
+        const idxBoss = stBoss.opts.findIndex(o => o === wantBoss);
+        if (idxBoss >= 0) {
+          await page.click('#q-options .q-opt >> nth=' + idxBoss);
+          await sleep(260);
+          const face = await page.evaluate(() => ({
+            txt: document.getElementById('monster-emoji').textContent,
+            cls: document.getElementById('monster-emoji').className,
+            boss: run.monster && run.monster.boss,
+            orig: run.monster && run.monster.emoji
+          }));
+          const FACE = { '🐉': '😵', '🐲': '😵‍💫', '👿': '😖', '🦖': '🥴', '🐋': '😵' };
+          const wantFace = FACE[bossSpawn.emoji];
+          ok('S17-C BOSS 受击切表情帧（' + bossSpawn.emoji + '→' + wantFace + '）且挂 .hit-face',
+            face.boss && face.txt === wantFace && face.cls.indexOf('hit-face') >= 0, JSON.stringify(face));
+          await sleep(500);
+          const back = await page.evaluate(() => ({
+            txt: document.getElementById('monster-emoji').textContent,
+            cls: document.getElementById('monster-emoji').className
+          }));
+          ok('S17-C 430ms 后表情回正（.hit-face 摘除）', back.txt === bossSpawn.emoji && back.cls.indexOf('hit-face') < 0, JSON.stringify(back));
+        } else {
+          skip('S17-C BOSS 受击表情帧', 'BOSS 题未渲染出可点击选项');
+        }
+
+        // 撤退进结算：高正确率撤退封顶 B（评级徽章状态机 + 不触发 S/A 档撒花）
+        for (let t = 0; t < 10; t++) {
+          const st = await page.evaluate(READ17);
+          if (!st.memcard) break;
+          await page.click('#mem-ok').catch(() => {});
+          await sleep(280);
+        }
+        await page.evaluate(() => { window.__gradeBursts = []; const oB = Confetti.burst.bind(Confetti); Confetti.burst = function (n, x, y) { window.__gradeBursts.push(n || 0); return oB(n, x, y); }; });
+        await page.click('#btn-quit');
+        await waitResult(page, 15000);
+        const gradeQuit = await page.evaluate(() => ({
+          cls: (document.getElementById('result-grade').className || '').toLowerCase(),
+          visible: !document.getElementById('result-grade').hidden,
+          cap: (document.querySelector('#result-grade .grade-cap') || {}).textContent || '',
+          bursts: window.__gradeBursts
+        }));
+        ok('S17-D2 撤退局评级徽章 grade-b（封顶不授 S/A）', gradeQuit.visible && gradeQuit.cls.indexOf('grade-b') >= 0, JSON.stringify(gradeQuit));
+        ok('S17-D2 B 级不触发 120/80 粒的 S/A 档撒花（成就/升级小爆发不计）',
+          gradeQuit.bursts.indexOf(120) < 0 && gradeQuit.bursts.indexOf(80) < 0, 'bursts=' + JSON.stringify(gradeQuit.bursts));
+
+        // 复习局全对 ≥5 题 → grade-S + 120 粒撒花（S 级撒花主链路）
+        await page.click('#btn-result-home');
+        await backHome(page);
+        await page.click('#btn-review');
+        await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+        await page.click('#btn-start');
+        await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        for (let i = 0; i < 90; i++) {
+          const st = await page.evaluate(READ17);
+          if (st.ended) break;
+          if (st.memcard) { await page.click('#mem-ok').catch(() => {}); await sleep(280); continue; }
+          if (st.locked) { await sleep(300); continue; }
+          const want = st.qtype === 'e2c' ? st.meaning : st.word;
+          const idx = st.opts.findIndex(o => o === want);
+          if (idx < 0) { await sleep(350); continue; }
+          await page.click('#q-options .q-opt >> nth=' + idx);
+          await sleep(1050);
+        }
+        await waitResult(page, 20000);
+        const gradeS = await page.evaluate(() => ({
+          cls: (document.getElementById('result-grade').className || '').toLowerCase(),
+          cap: (document.querySelector('#result-grade .grade-cap') || {}).textContent || '',
+          bursts: window.__gradeBursts
+        }));
+        ok('S17-D2 复习全对局 grade-S（无伤通关徽章）', gradeS.cls.indexOf('grade-s') >= 0, JSON.stringify(gradeS));
+        ok('S17-D2 S 级撒花（120 粒 Confetti 爆发）', gradeS.bursts.indexOf(120) >= 0, 'bursts=' + JSON.stringify(gradeS.bursts));
+        ok('S17 全程零页面异常', errors17.length === 0, errors17.join(' | '));
+        await page.click('#btn-result-home');
+        await backHome(page);
+        await c17.context.close();
       }
 
       /* ============ S-PERF · 性能预算基线（本地服务 · 每轮对比） ============ */
