@@ -3368,10 +3368,11 @@ function startRunCore(mode, listIds, diffKey, explicitPool, rogueCfg, bannerExtr
   Array.prototype.forEach.call($('castle-fx').querySelectorAll('.castle-smoke,.castle-spark'), function (n) { n.remove(); });
   castleSmokeOn = false;
   $('scr-battle').classList.remove('boss-live', 'combo-heat-1', 'combo-heat-2', 'combo-heat-3');
-  /* r18 新特效状态复位：边缘光晕档位 / 跨档脉冲定时器 / BOSS 受击表情帧回正定时器 / 徽章去重缓存 */
+  /* r18 新特效状态复位：边缘光晕档位 / 跨档脉冲定时器（光晕 + 徽章换挡两枚）/ BOSS 受击表情帧回正定时器 / 徽章去重缓存 */
   var glow0 = $('combo-glow');
   if (glow0) glow0.classList.remove('glow-1', 'glow-2', 'glow-3', 'pulse');
   if (comboGlowTimer) { clearTimeout(comboGlowTimer); comboGlowTimer = 0; }
+  if (comboTierTimer) { clearTimeout(comboTierTimer); comboTierTimer = 0; }
   if (hitFaceTimer) { clearTimeout(hitFaceTimer); hitFaceTimer = 0; }
   updateHUD._lastCombo = 0;
   $('hero-emoji').textContent = (mode === 'adventure' || mode === 'endless' || mode === 'expedition') ? '🏰'
@@ -4322,7 +4323,12 @@ function heroAttackFx(dmgText, coinGain, crit) {
   void hero.offsetWidth;
   hero.classList.add('attack');
   var mon = $('monster-emoji');
+  /* 命中拍守卫（r18b）：180ms 内若收局/换局（极快击杀+结算、撤退、接力恢复），
+     受击表情/金色粒子/斩击弧不再落到新屏上——fx-layer 是全局 fixed 层，
+     无守卫时粒子会飞在结算页上（与 monsterAttack 的 atkSeq0 / killMonster 的 killSeq 同款守卫） */
+  var atkFxSeq = runEpoch;
   setTimeout(function () {
+    if (!run || run.ended || runEpoch !== atkFxSeq) return;
     mon.classList.remove('hit');
     void mon.offsetWidth;
     mon.classList.add('hit');
@@ -5103,7 +5109,9 @@ function updateHUD() {
     void combo.offsetWidth;
     combo.classList.add('tier-up');
     if (comboTierTimer) clearTimeout(comboTierTimer);
-    comboTierTimer = setTimeout(function () { combo.classList.remove('tier-up'); }, 540);
+    /* 摘除定时器到期自清零（r18b）：与 hitFaceTimer/persistNow 同一约定——句柄触发后
+       归零，避免「定时器早已跑完但变量仍持 stale 句柄」污染特效状态机观测口径 */
+    comboTierTimer = setTimeout(function () { combo.classList.remove('tier-up'); comboTierTimer = 0; }, 540);
     /* 光晕跨档单发脉冲（r18）：换挡那一拍外圈亮一下再回到呼吸档 */
     if (glow) {
       glow.classList.remove('pulse');
@@ -5111,6 +5119,7 @@ function updateHUD() {
       glow.classList.add('pulse');
       if (comboGlowTimer) clearTimeout(comboGlowTimer);
       comboGlowTimer = setTimeout(function () {
+        comboGlowTimer = 0;
         var g = $('combo-glow');
         if (g) g.classList.remove('pulse');
       }, 640);
@@ -5657,8 +5666,11 @@ function openWordDetail(w) {
     stats.push('👀 见过 ' + m.seen + ' 次');
     stats.push('✅ 答对 ' + m.ok);
     stats.push('❌ 答错 ' + m.wrong);
-    stats.push('⏰ 下次复习 ' + humanizeDue(m.due - Date.now()));
+    /* 下次复习与「今日待复习」同源（r19 低危清账）：有间隔重复排程的词读 srs.due
+       （r17 起排程的唯一权威，分钟级 legacy mastery.due 与日阶梯档位会各说各话）；
+       未入学的词回落 legacy mastery.due */
     var se = (save.srs || {})[w];
+    stats.push('⏰ 下次复习 ' + humanizeDue((se ? se.due : m.due) - Date.now()));
     if (se) stats.push('🧠 记忆档位 ' + srsTierName(se.st) + (se.due <= Date.now() ? ' · 已到期' : ''));
   } else {
     stats.push('⬜ 还没学过这个词');

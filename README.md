@@ -136,7 +136,7 @@ node tests/run-all.js
 
 # 分套直跑
 node tests/run-all.js unit      # node 直跑，秒级：存档 sanitize/迁移矩阵、成就、SRS 排程（r17 间隔重复档位/队列/兼容）、词景/音节/例句、四种码编解码、DEFLATE
-node tests/run-all.js e2e       # playwright headless，约 10-13 分钟：入口可达/引导/投毒·接力·词境全链路/结算结构/键盘可达/触屏目标/触屏注入/动效预算/连局压测（同页 10 局混排：零 pageerror + heap 增长 ≤8MB）/S16 间隔重复与记忆画像（排程/晋升降档/到期队列/例句填空/三词卡/词景覆盖率 SCENE-STATS/连击串）/特效状态机（粒子/BOSS 出场受击/S·A 撒花/连击光晕/视差）/性能预算
+node tests/run-all.js e2e       # playwright headless，约 10-13 分钟：入口可达/引导/投毒·接力·词境全链路/结算结构/键盘可达/触屏目标/触屏注入/动效预算/连局压测（同页 10 局混排：零 pageerror + heap 增长 ≤8MB）/S16 间隔重复与记忆画像（排程/晋升降档/到期队列/例句填空/三词卡/词景覆盖率 SCENE-STATS/连击串）/特效状态机（粒子/BOSS 出场受击/S·A 撒花/连击光晕/视差）/S18 记忆效果验收链（旧档迁移→新词学习→答错入错题→到期复习→再答对晋升→攻克出册→成熟→队列空态，全程断言档位/队列/存档字段 + 2909 词记忆画像覆盖率 PROFILE-STATS + 无词根音节 fallback 抽查 + 词景联动）/性能预算
 node tests/run-all.js monkey    # 2 分钟随机漫游压测：真实点击 + 键盘注入，硬门槛零 pageerror（不并入默认 all，发版前手动跑一次）
 ```
 
