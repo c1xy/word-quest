@@ -30,7 +30,9 @@
      S17 r18 特效状态机（答对金色粒子迸发 .fx-gold、连击边缘光晕 combo-glow 与
          combo-heat 档位同步、BOSS 出场 boss-enter/名牌压入与受击表情帧 .hit-face
          430ms 回正、背景分层视差 .bg-far+.deco-layer 双层 translate3d、结算评级
-         grade-S/A/B 徽章与 S 级 120 粒撒花/B 级不撒花）
+         grade-S/A/B 徽章与 S 级 120 粒撒花/B 级不撒花；r18b 补：跨档 pulse 摘除
+         定时器到期自清零 comboGlowTimer/comboTierTimer、连击回落态 combo-heat-*与
+         glow-*全摘）
      S18 记忆效果验收链（r19：旧档迁移兼容→新词学习→答错入错题→到期复习→再答对
          晋升→攻克出册→成熟→队列空态收口，全程断言档位/队列/存档字段；附 2909 词
          记忆画像内容覆盖率统计 PROFILE-STATS 行 + 无词根音节 fallback 抽查 ≥20 词
@@ -2208,6 +2210,10 @@ if (!resolvable) {
             （纯 transform/opacity 合成动画；关键帧白名单由 S14-C 全局扫描兜底）。
          B. 连击边缘光晕（与 R15 combo-heat 同档独立成层）：3/6/10 连 →
             #combo-glow.glow-1/2/3 与 scr-battle.combo-heat-N 同步挂载、回落互斥摘除。
+         B2. 特效定时器自清零（r18b）：跨档 pulse/tier-up 摘除定时器到期后句柄归零
+             （comboGlowTimer/comboTierTimer 不留 stale 句柄）。
+         B3. 连击回落态（r18b 补断言）：答错断连 → combo-heat-1/2/3 与 glow-1/2/3(+pulse)
+             全摘、连击徽章 .show 摘除（此前只断言升档，回落是状态机盲区）。
          C. BOSS 出场/受击表情帧：注入 bossStage 走真实 nextMonster——出场瞬间
             .boss-enter + boss-live、900ms 后按怪身份摘类；答对 BOSS 一题受击瞬间
             emoji 切到 BOSS_HIT_FACE 变体 + .hit-face，430ms 后回正。
@@ -2313,6 +2319,58 @@ if (!resolvable) {
         ok('S17-B 6 连：glow-2 抬升且 glow-1 摘除（与 combo-heat-2 同步）', !!glow2 && glow2.g2 && glow2.g1off && glow2.h2, JSON.stringify(glow2));
         ok('S17-B 10 连：glow-3 满档（与 combo-heat-3 同步）', !!glow3 && glow3.g3 && glow3.h3, JSON.stringify(glow3));
         ok('S17-B 连击 ≥10 累计达成', comboN >= 10, 'combo=' + comboN);
+
+        // B2. 特效定时器自清零（r18b）：10 连后的跨档 pulse 摘除定时器到期后句柄归零，
+        //     不留 stale 句柄（与 hitFaceTimer/persistNow 自清零约定一致，r18 修正前
+        //     comboGlowTimer/comboTierTimer 触发后仍持旧句柄）
+        await sleep(720);   // >640ms glow pulse 摘除窗口（tier-up 徽章 540ms 窗口也早已过）
+        const timersZero = await page.evaluate(() => ({
+          glow: typeof comboGlowTimer === 'undefined' ? -1 : comboGlowTimer,
+          tier: typeof comboTierTimer === 'undefined' ? -1 : comboTierTimer,
+          pulseGone: !document.getElementById('combo-glow').classList.contains('pulse'),
+          tierGone: !document.getElementById('battle-combo').classList.contains('tier-up')
+        }));
+        ok('S17-B2 跨档 pulse 摘除定时器到期自清零（comboGlowTimer/comboTierTimer 归零且 pulse/tier-up 已摘）',
+          timersZero.glow === 0 && timersZero.tier === 0 && timersZero.pulseGone && timersZero.tierGone, JSON.stringify(timersZero));
+
+        // B3. 连击回落态（r18b 补断言）：答错断连 → combo-heat-1/2/3 与 glow-1/2/3(+pulse)
+        //     全摘、徽章 .show 摘除——此前 S14/S17 只断言升档，回落态是特效状态机的盲区
+        await page.waitForFunction(() => {
+          const r = typeof run === 'undefined' ? null : run;
+          const mem = document.getElementById('memcard');
+          return !!(r && r.q && !r.q.locked && mem && mem.hidden);
+        }, { timeout: 15000 });
+        const dropRead = await page.evaluate(() => {
+          const r = run;
+          return {
+            word: r.q.word.w, meaning: r.q.word.m, qtype: r.q.type,
+            opts: Array.from(document.querySelectorAll('#q-options .q-opt')).map(b => b.textContent.replace(/^[0-9]+/, '').trim())
+          };
+        });
+        const wrongIdx17 = dropRead.opts.findIndex(o => o !== (dropRead.qtype === 'e2c' ? dropRead.meaning : dropRead.word));
+        if (wrongIdx17 >= 0) {
+          await page.click('#q-options .q-opt >> nth=' + wrongIdx17);
+          await sleep(320);
+          const dropGlow = await page.evaluate(() => ({
+            combo: run.combo,
+            heat: ['combo-heat-1', 'combo-heat-2', 'combo-heat-3'].filter(c => document.getElementById('scr-battle').classList.contains(c)),
+            glow: ['glow-1', 'glow-2', 'glow-3', 'pulse'].filter(c => document.getElementById('combo-glow').classList.contains(c)),
+            badgeShow: document.getElementById('battle-combo').classList.contains('show')
+          }));
+          ok('S17-B3 连击回落：答错断连后 combo-heat-* 与 glow-*（含 pulse）全摘、徽章隐藏',
+            dropGlow.combo === 0 && dropGlow.heat.length === 0 && dropGlow.glow.length === 0 && !dropGlow.badgeShow, JSON.stringify(dropGlow));
+          // 关掉答错后弹出的记忆卡（miss-chain 延迟 650ms 弹出，先等它出现再关），
+          // 否则卡片会一直挡住答题链，C 段 waitForFunction(!locked) 必超时
+          await page.waitForSelector('#memcard:not([hidden])', { timeout: 4000 }).catch(() => {});
+          for (let t = 0; t < 10; t++) {
+            const stM = await page.evaluate(READ17);
+            if (!stM.memcard) break;
+            await page.click('#mem-ok').catch(() => {});
+            await sleep(280);
+          }
+        } else {
+          skip('S17-B3 连击回落', '当前题面无可点击的错误选项');
+        }
 
         // C. BOSS 出场 + 受击表情帧（注入 bossStage 走真实 nextMonster）
         await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && !run.q.locked, { timeout: 15000 });
