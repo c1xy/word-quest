@@ -31,6 +31,10 @@
          combo-heat 档位同步、BOSS 出场 boss-enter/名牌压入与受击表情帧 .hit-face
          430ms 回正、背景分层视差 .bg-far+.deco-layer 双层 translate3d、结算评级
          grade-S/A/B 徽章与 S 级 120 粒撒花/B 级不撒花）
+     S18 记忆效果验收链（r19：旧档迁移兼容→新词学习→答错入错题→到期复习→再答对
+         晋升→攻克出册→成熟→队列空态收口，全程断言档位/队列/存档字段；附 2909 词
+         记忆画像内容覆盖率统计 PROFILE-STATS 行 + 无词根音节 fallback 抽查 ≥20 词
+         + 词景与联想行联动）
      S-PERF 性能预算（本地服务：主页加载 ≤3s、首次可交互 ≤5s、JS heap 采样入 PERF-BASELINE 行）
    依赖：playwright 或 playwright-core（找不到时整组 SKIP，退出码 0 并说明原因），
    浏览器可执行文件依次探测 playwright 自带 chromium → 环境变量 WQ_CHROME_PATH →
@@ -2404,6 +2408,355 @@ if (!resolvable) {
         await page.click('#btn-result-home');
         await backHome(page);
         await c17.context.close();
+      }
+
+      /* ============ S18 · 记忆效果验收链（r19 新增维度） ============
+         一条从旧档到成熟的完整记忆闭环（同一 context 全程贯通，全部走真实 UI 作答与落盘核对）：
+         A 旧档迁移兼容：v1 时代存档（无 srs/wrongBook/firstRun/一次性迁移标记）走真实 loadSave
+           通道——srs 排程表/错题本自动补全、题型迁移照跑、旧进度保留、老玩家不弹引导、迁移结果落盘
+         B 新词学习→答错入错题：复习局真实作答——新词答错 srs 维持新词档且立即到期（今日回
+           队列）+ 错题本入册（n/t 落盘），记忆卡关闭后同词重考答对 → 晋升 1 天档（due≈+1d）
+         C 到期复习：时间快进后主页入口计数（今日到期 N 词）/ 最逾期优先队列 → 「今日待复习」
+           会话按队列顺序作答，答对晋升 3 天档；种子存档经 reload 往返核实
+         C2 队列上限：21 词到期 → 入口计数带「本次先复习 20 词」截断提示、会话队列
+           =SRS_SESSION_MAX=20 且横幅注明截断（最逾期优先不被截断破坏）
+         D 再答对晋升：7 天档晋升 + 掌握度满 3 星自动攻克错题（wrongBook 清册 + 📕 toast）
+         E 晋升成熟：7 天档答对 → 成熟档（30 天回归）落盘，掌握度 4 星
+         F 闭环收口：队列清空回空态文案；图鉴词详情「记忆档位 成熟」徽章 + 记忆画像三行联动
+         G 内容质量抽查（2909 词全量走真实 renderWordProfile）：词根拆解/联想/例句三行覆盖率
+           统计（PROFILE-STATS 基线行）+ 无词根词音节 fallback 生效抽查 ≥20 词（音节行格式
+           与 syllablesOf 一致）+ 记忆画像与词景图联动（词景词联想行首 = 词景 emoji + 类别钩子） */
+      console.log('---- S18 记忆效果验收链（r19） ----');
+      {
+        /* 种子 = v1 时代旧档（A 节断言迁移），此后 B~F 全链路都在这份迁移后的存档上走完。
+           注意：无 srs / wrongBook / firstRun / xp / 一次性迁移标记——r17 之前的历史形态 */
+        const legacySeed = {
+          coins: 120,
+          upgrades: { hp: 2, time: 1, shield: 0, coin: 1 },
+          mastery: { abandon: { lv: 3, seen: 5, ok: 4, wrong: 1, last: 1700000000000, due: 0, wrongStreak: 0 } },
+          streak: { count: 2, last: '2026-01-01', todayCount: 1 },
+          best: { adventure: 6, endless: 12 },
+          settings: { sound: true, autoplay: true, rate: 0.9, qtypes: { c2e: false, e2c: true, spell: true, listen: false } },
+          customLists: [{ id: 'custom_chain', name: '记忆闭环链', desc: 'S18 记忆效果验收链', words: [['transport', 'v. 运输；传送 n. 运输']] }],
+          lastLists: ['custom_chain'],
+          lastDiff: 'normal',
+          daily: { date: '', tasks: [] },
+          ach: {}, pets: {}, pet: '',
+          stats: { kills: 0, bosses: 0, spellOk: 0, listenOk: 0, runs: 2, dailyDone: 0, maxCombo: 4, perfects: 0, packDone: 0, labN: 0, labOk: 0, expWins: 0, packDoneMap: {} }
+        };
+        const c18 = await newContext(browser, legacySeed);
+        const errors18 = [];
+        c18.page.on('pageerror', e => errors18.push(e.message));
+        const page = c18.page;
+        const DAY = 864e5;
+        /* 读落盘存档：先冲掉 persist 防抖，保证读到最新磁盘态（档位/队列断言一律以磁盘为准） */
+        const diskSave = () => page.evaluate(() => {
+          if (typeof persistFlush === 'function') persistFlush();
+          return JSON.parse(localStorage.getItem('wq_save_v1'));
+        });
+        /* 时间快进：以当前落盘档为基线改 srs 到期 → 整档重种 + reload（同时核实存档往返保真） */
+        async function skipToOverdue(mutate) {
+          const cur = await diskSave();
+          mutate(cur, Date.now());
+          await reseedSave(page, cur);
+          await page.waitForSelector('#scr-home.active', { timeout: 15000 });
+        }
+        /* 轮询收集 toast（toast 队列串行播放 2300ms/条，任务完成等提示可能排在攻克提示前面） */
+        async function pollToast(pg, needle, budgetMs) {
+          const t0 = Date.now();
+          let found = '';
+          while (Date.now() - t0 < budgetMs) {
+            const ts = await pg.evaluate(() => Array.from(document.querySelectorAll('#toast-wrap .toast')).map(t => t.textContent));
+            const hit = ts.find(t => t.indexOf(needle) >= 0);
+            if (hit) { found = hit; break; }
+            await sleep(200);
+          }
+          return found;
+        }
+
+        /* ---------- A. 旧档迁移兼容（v1 时代档 → 真实 loadSave 通道） ---------- */
+        {
+          await gotoHome(page);
+          const mig = await page.evaluate(() => ({
+            srsType: typeof save.srs, srsKeys: Object.keys(save.srs || {}).length,
+            wbKeys: Object.keys(save.wrongBook || {}).length,
+            abLv: save.mastery.abandon ? save.mastery.abandon.lv : null,
+            abOk: save.mastery.abandon ? save.mastery.abandon.ok : null,
+            coins: save.coins, bestAdv: save.best.adventure,
+            m1: save.settings.choiceOnlyMigrated, m2: save.settings.c2eOnlyMigrated,
+            qtC2e: save.settings.qtypes.c2e, qtE2c: save.settings.qtypes.e2c,
+            firstRun: save.firstRun,
+            srsSub: document.getElementById('srs-sub').textContent
+          }));
+          ok('S18-A 旧档 srs 排程表自动补全（空对象，向后兼容）', mig.srsType === 'object' && mig.srsKeys === 0, JSON.stringify(mig));
+          ok('S18-A 旧档错题本自动补全（空对象）', mig.wbKeys === 0, JSON.stringify(mig));
+          ok('S18-A 旧进度保留：abandon lv3/ok4 · 金币 120 · 冒险最佳 6', mig.abLv === 3 && mig.abOk === 4 && mig.coins === 120 && mig.bestAdv === 6, JSON.stringify(mig));
+          ok('S18-A 一次性题型迁移照跑（e2c/spell 关 → c2e 单题型 + 迁移标记置位）',
+            mig.m1 === true && mig.m2 === true && mig.qtC2e === true && mig.qtE2c === false, JSON.stringify(mig));
+          ok('S18-A 旧档视为老玩家（firstRun=false 不弹引导）', mig.firstRun === false, JSON.stringify(mig));
+          ok('S18-A 迁移后入口空态文案（无 srs 记录 → 今日没有到期词）', mig.srsSub.indexOf('今日没有到期词') >= 0, mig.srsSub);
+          const diskMig = await diskSave();
+          ok('S18-A 迁移结果已落盘（localStorage 里 srs/wrongBook/迁移标记齐全）',
+            diskMig.srs && Object.keys(diskMig.srs).length === 0 && diskMig.wrongBook &&
+            Object.keys(diskMig.wrongBook).length === 0 && diskMig.settings.choiceOnlyMigrated === true,
+            JSON.stringify({ srs: Object.keys(diskMig.srs || {}).length, wb: Object.keys(diskMig.wrongBook || {}).length, m1: diskMig.settings.choiceOnlyMigrated }));
+        }
+
+        /* ---------- B. 新词学习 → 答错入错题 → 重考答对晋升 1 天档（真实复习局） ---------- */
+        await page.click('#btn-review');
+        await page.waitForSelector('#scr-setup.active', { timeout: 5000 });
+        await page.click('#btn-start');
+        await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q, { timeout: 15000 });
+        const b0 = await page.evaluate(() => ({ mode: run.mode, word: run.q.word.w, qtype: run.q.type }));
+        ok('S18-B 复习局开打（单词条池 · c2e 题型）', b0.mode === 'review' && b0.word === 'transport' && b0.qtype === 'c2e', JSON.stringify(b0));
+        await answerWrongOnce(page);
+        await page.waitForSelector('#memcard:not([hidden])', { timeout: 8000 });
+        const bWrong = await diskSave();
+        ok('S18-B 新词答错：srs 维持新词档 st=0 且立即到期（今日回队列）',
+          bWrong.srs.transport && bWrong.srs.transport.st === 0 && bWrong.srs.transport.due <= Date.now() &&
+          bWrong.srs.transport.wrong === 1 && bWrong.srs.transport.ok === 0, JSON.stringify(bWrong.srs.transport));
+        ok('S18-B 答错入错题本：wrongBook.transport={n:1,t} 落盘',
+          bWrong.wrongBook.transport && bWrong.wrongBook.transport.n === 1 && bWrong.wrongBook.transport.t > 0,
+          JSON.stringify(bWrong.wrongBook.transport));
+        ok('S18-B 掌握度字段同步：seen=1 / wrong=1 / lv=0',
+          bWrong.mastery.transport && bWrong.mastery.transport.seen === 1 && bWrong.mastery.transport.wrong === 1 &&
+          bWrong.mastery.transport.lv === 0, JSON.stringify(bWrong.mastery.transport));
+        await page.click('#mem-ok');
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && run.q.word.w === 'transport' && !run.q.locked, { timeout: 15000 });
+        await battleChoice(page, 1);
+        const bRight = await diskSave();
+        ok('S18-B 同词重考答对晋升 1 天档：st 0→1 且 due≈+1 天',
+          bRight.srs.transport.st === 1 && Math.abs(bRight.srs.transport.due - (Date.now() + DAY)) < 5000,
+          JSON.stringify(bRight.srs.transport));
+        ok('S18-B 错题本仍在册（1 星未攻克）', bRight.wrongBook.transport && bRight.wrongBook.transport.n === 1,
+          JSON.stringify(bRight.wrongBook));
+        ok('S18-B 掌握度晋升：lv 0→1 / ok=1 / seen=2',
+          bRight.mastery.transport.lv === 1 && bRight.mastery.transport.ok === 1 && bRight.mastery.transport.seen === 2,
+          JSON.stringify(bRight.mastery.transport));
+        /* 单词条池从出战设置进复习局：reviewTotal = min(sessionSize, pool)=1，重考答对即自动收官 */
+        await waitResult(page, 15000);
+        await assertResult(page, 'S18-B 新词学习收官', '🎉 复习完成！', '📖 复习 1 词');
+        await page.click('#btn-result-home');
+        await backHome(page);
+
+        /* ---------- C. 到期复习：入口计数 / 最逾期优先队列 / 会话按队列作答晋升 ---------- */
+        await skipToOverdue((s, now) => {
+          s.srs.abandon = { st: 1, due: now - 3 * DAY, ok: 1, wrong: 0, t: now };   // 更逾期的老档词（1 天档）
+          s.srs.transport.due = now - DAY;                                          // 链上词：昨天到期
+        });
+        const q1 = await page.evaluate(() => ({
+          sub: document.getElementById('srs-sub').textContent,
+          queue: srsDueList().map(x => ({ w: x.w, st: x.st, due: x.due }))
+        }));
+        ok('S18-C 入口计数「今日到期 2 词」（时间快进后两条档位都逾期）', q1.sub.indexOf('今日到期 2 词') >= 0, q1.sub);
+        ok('S18-C 队列最逾期优先：abandon(-3 天) 在 transport(-1 天) 前',
+          q1.queue.length === 2 && q1.queue[0].w === 'abandon' && q1.queue[1].w === 'transport' &&
+          q1.queue[0].due <= q1.queue[1].due, JSON.stringify(q1.queue));
+        ok('S18-C 队列条目带档位快照（st=1 × 2 · reload 后存档往返完好）',
+          q1.queue.length === 2 && q1.queue.every(x => x.st === 1), JSON.stringify(q1.queue));
+        await page.click('#btn-srs-review');
+        await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q, { timeout: 15000 });
+        const c0 = await page.evaluate(() => ({ mode: run.mode, total: run.reviewTotal, word: run.q.word.w }));
+        ok('S18-C 会话 mode=srs / 词队列=2 / 首词=最逾期的 abandon', c0.mode === 'srs' && c0.total === 2 && c0.word === 'abandon', JSON.stringify(c0));
+        await battleChoice(page, 1);
+        const cAb = await diskSave();
+        ok('S18-C abandon 答对晋升 1→2（3 天档 · due≈+3 天）',
+          cAb.srs.abandon.st === 2 && Math.abs(cAb.srs.abandon.due - (Date.now() + 3 * DAY)) < 5000, JSON.stringify(cAb.srs.abandon));
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && run.q.word.w === 'transport' && !run.q.locked, { timeout: 15000 });
+        await battleChoice(page, 1);
+        const cTr = await diskSave();
+        ok('S18-C transport 答对晋升 1→2（3 天档 · due≈+3 天）',
+          cTr.srs.transport.st === 2 && Math.abs(cTr.srs.transport.due - (Date.now() + 3 * DAY)) < 5000, JSON.stringify(cTr.srs.transport));
+        await waitResult(page, 20000);
+        await assertResult(page, 'S18-C 复习完成', '🧠 今日待复习完成！', '🧠 复习 2 词');
+        const cChips = await page.evaluate(() => Array.from(document.querySelectorAll('#result-stats .chip')).map(c => c.textContent.trim()));
+        ok('S18-C 结算 chips 记账「⬆️ 晋升 2 词 / ⬇️ 降档 0 词」（局首档→收局档净变化）',
+          cChips.some(c => c.indexOf('⬆️ 晋升 2') >= 0) && cChips.some(c => c.indexOf('⬇️ 降档 0') >= 0), JSON.stringify(cChips));
+        await page.click('#btn-result-home');
+        await backHome(page);
+
+        /* ---------- D. 再答对晋升 3→7 天档 + 掌握度满 3 星攻克错题出册 ---------- */
+        await skipToOverdue((s, now) => {
+          s.srs.abandon.due = now - 2 * 3600e3;
+          s.srs.transport.due = now - 3600e3;
+        });
+        const q2 = await page.evaluate(() => ({
+          sub: document.getElementById('srs-sub').textContent,
+          queue: srsDueList().map(x => x.w)
+        }));
+        ok('S18-D 再度到期：入口计数 2 词（3 天档到期回队列）', q2.sub.indexOf('今日到期 2 词') >= 0, q2.sub);
+        ok('S18-D 队列仍按最逾期优先（abandon 先于 transport）',
+          q2.queue.length === 2 && q2.queue[0] === 'abandon' && q2.queue[1] === 'transport', JSON.stringify(q2.queue));
+        await page.click('#btn-srs-review');
+        await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q, { timeout: 15000 });
+        await battleChoice(page, 1);   // abandon 答对 → 3→7 天档
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && run.q.word.w === 'transport' && !run.q.locked, { timeout: 15000 });
+        await battleChoice(page, 1);   // transport 答对 → 3→7 天档 + 掌握度满 3 星攻克出册
+        const dToast = await pollToast(page, '已攻克错题', 8000);
+        const dSave = await diskSave();
+        ok('S18-D transport 晋升 7 天档：st 2→3 且 due≈+7 天',
+          dSave.srs.transport.st === 3 && Math.abs(dSave.srs.transport.due - (Date.now() + 7 * DAY)) < 5000, JSON.stringify(dSave.srs.transport));
+        ok('S18-D 「📕 已攻克错题」toast 提到 transport', dToast.indexOf('transport') >= 0, JSON.stringify(dToast));
+        ok('S18-D 错题本清册（3 星攻克出册）', Object.keys(dSave.wrongBook).length === 0, JSON.stringify(dSave.wrongBook));
+        ok('S18-D 掌握度 3 星（lv=3）', dSave.mastery.transport.lv === 3, dSave.mastery.transport.lv);
+        await waitResult(page, 20000);
+        await assertResult(page, 'S18-D 复习完成', '🧠 今日待复习完成！', '🧠 复习 2 词');
+        await page.click('#btn-result-home');
+        await backHome(page);
+
+        /* ---------- E. 7 天档答对 → 成熟（30 天回归） ---------- */
+        await skipToOverdue((s, now) => {
+          s.srs.abandon.due = now - 2 * 3600e3;
+          s.srs.transport.due = now - 3600e3;
+        });
+        const q3 = await page.evaluate(() => ({
+          sub: document.getElementById('srs-sub').textContent,
+          queue: srsDueList().map(x => x.w)
+        }));
+        ok('S18-E 7 天档到期：入口计数 2 词', q3.sub.indexOf('今日到期 2 词') >= 0, q3.sub);
+        await page.click('#btn-srs-review');
+        await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q, { timeout: 15000 });
+        await battleChoice(page, 1);
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q && run.q.word.w === 'transport' && !run.q.locked, { timeout: 15000 });
+        await battleChoice(page, 1);
+        const eSave = await diskSave();
+        ok('S18-E transport 晋升成熟档：st=4 且 due≈+30 天（SM-2 lite 固定回归）',
+          eSave.srs.transport.st === 4 && Math.abs(eSave.srs.transport.due - (Date.now() + 30 * DAY)) < 5000, JSON.stringify(eSave.srs.transport));
+        ok('S18-E abandon 同步成熟（st=4）', eSave.srs.abandon.st === 4, eSave.srs.abandon.st);
+        ok('S18-E 掌握度 4 星', eSave.mastery.transport.lv === 4, eSave.mastery.transport.lv);
+        ok('S18-E 排程词条字段集完整（st/due/ok/wrong/t 五字段齐全 · 存档往返无损）',
+          ['st', 'due', 'ok', 'wrong', 't'].every(k => typeof eSave.srs.transport[k] === 'number') &&
+          eSave.srs.transport.ok >= 4 && eSave.srs.transport.wrong === 1, JSON.stringify(eSave.srs.transport));
+        await waitResult(page, 20000);
+        await assertResult(page, 'S18-E 复习完成', '🧠 今日待复习完成！', '🧠 复习 2 词');
+        const eChips = await page.evaluate(() => Array.from(document.querySelectorAll('#result-stats .chip')).map(c => c.textContent.trim()));
+        ok('S18-E 结算 chips 记账「⬆️ 晋升 2 词」（双词 7 天档→成熟）',
+          eChips.some(c => c.indexOf('⬆️ 晋升 2') >= 0) && eChips.some(c => c.indexOf('⬇️ 降档 0') >= 0), JSON.stringify(eChips));
+        await page.click('#btn-result-home');
+        await backHome(page);
+
+        /* ---------- F. 闭环收口：队列清空回空态 + 词详情「记忆档位 成熟」+ 记忆画像联动 ---------- */
+        const f0 = await page.evaluate(() => ({
+          sub: document.getElementById('srs-sub').textContent,
+          dueN: srsCountToday()
+        }));
+        ok('S18-F 成熟档 30 天回归未到期：入口回空态文案（记忆闭环走完）', f0.dueN === 0 && f0.sub.indexOf('今日没有到期词') >= 0, JSON.stringify(f0));
+        await page.click('#btn-codex');
+        await page.waitForSelector('#scr-codex.active', { timeout: 5000 });
+        await page.fill('#codex-search', 'transport');
+        await page.waitForSelector('#codex-list .cx-row', { timeout: 5000 });
+        await page.click('#codex-list .cx-row');
+        await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 5000 });
+        const fWo = await page.evaluate(() => ({
+          word: document.getElementById('wo-word').textContent,
+          chips: Array.from(document.querySelectorAll('#wo-stats .chip')).map(c => c.textContent),
+          rows: Array.from(document.querySelectorAll('#wo-profile .wp-row')).map(r => ({
+            tag: r.querySelector('.wp-tag').textContent, val: r.querySelector('.wp-val').textContent }))
+        }));
+        ok('S18-F 词详情档位徽章「🧠 记忆档位 成熟」', fWo.chips.some(c => c.indexOf('记忆档位 成熟') >= 0), JSON.stringify(fWo.chips));
+        /* 「⏰ 下次复习」与「今日待复习」同源（r19 低危清账回归钉）：有排程的词读 srs.due
+           ——成熟档显示「30 天后」；修复前读 legacy mastery.due（4 星 ≈48h·ease，会显示
+           「2 天后」，与档位徽章/入口队列各说各话） */
+        ok('S18-F 「⏰ 下次复习」读排程 srs.due（成熟档 30 天后 · 与今日待复习同口径）',
+          fWo.chips.some(c => c.indexOf('⏰ 下次复习 30 天后') >= 0), JSON.stringify(fWo.chips));
+        ok('S18-F 记忆画像三行在位（拆解/联想/例句）',
+          fWo.rows.length === 3 && fWo.rows[0].tag.indexOf('拆解') >= 0 &&
+          fWo.rows[1].tag.indexOf('联想') >= 0 && fWo.rows[2].tag.indexOf('例句') >= 0, JSON.stringify(fWo.rows));
+        ok('S18-F 拆解行复用词汇密码（trans/port）', fWo.rows[0].val.indexOf('trans') >= 0 && fWo.rows[0].val.indexOf('port') >= 0, fWo.rows[0].val);
+        await page.click('#wo-close');
+        await page.click('#btn-codex-back');
+        await backHome(page);
+
+        /* ---------- C2. 队列上限：>20 词到期 → 入口提示截断 + 会话只带最逾期 20 词 ---------- */
+        const FILLERS = ['ability', 'absorb', 'academic', 'accent', 'access', 'achieve', 'acquire', 'adjust',
+          'admire', 'advance', 'advice', 'afford', 'agree', 'alarm', 'ancient', 'annoy', 'apologize', 'appear', 'apply'];
+        await skipToOverdue((s, now) => {
+          s.srs.abandon.due = now - 3 * 3600e3;                    // 最逾期 → 队首
+          s.srs.transport.due = now - 2 * 3600e3;
+          FILLERS.forEach((w, i) => { s.srs[w] = { st: 1, due: now - 60e3 * (i + 1), ok: 1, wrong: 0, t: now }; });
+        });
+        const q4 = await page.evaluate(() => ({
+          sub: document.getElementById('srs-sub').textContent,
+          dueN: srsCountToday(),
+          first: (srsDueList()[0] || {}).w
+        }));
+        ok('S18-C2 21 词到期：入口计数带截断提示「今日到期 21 词 · 本次先复习 20 词」',
+          q4.dueN === 21 && q4.sub.indexOf('今日到期 21 词') >= 0 && q4.sub.indexOf('本次先复习 20 词') >= 0, JSON.stringify(q4));
+        ok('S18-C2 队首仍是最逾期的 abandon', q4.first === 'abandon', q4.first);
+        await page.click('#btn-srs-review');
+        await page.waitForSelector('#scr-battle.active', { timeout: 8000 });
+        await page.waitForFunction(() => typeof run !== 'undefined' && run && run.q, { timeout: 15000 });
+        const ov = await page.evaluate(() => ({
+          total: run.reviewTotal, first: run.q.word.w,
+          banner: document.getElementById('banner-box').textContent
+        }));
+        ok('S18-C2 会话队列截断为 20 词（SRS_SESSION_MAX）且首词=abandon', ov.total === 20 && ov.first === 'abandon', JSON.stringify(ov));
+        ok('S18-C2 横幅注明「今日到期 21 词，本次先复习最逾期的 20 词」',
+          ov.banner.indexOf('今日到期 21 词') >= 0 && ov.banner.indexOf('本次先复习最逾期的 20 词') >= 0, ov.banner);
+        await quitOrSettled(page);
+        await waitResult(page, 15000);
+        await page.click('#btn-result-home');
+        await backHome(page);
+
+        /* ---------- G. 内容质量抽查（2909 词全量走真实 renderWordProfile 渲染） ---------- */
+        const g = await page.evaluate(() => {
+          const box = document.getElementById('wo-profile');
+          let root = 0, syl = 0, neither = 0, assoc = 0, cloze = 0, sceneN = 0, sceneLinked = 0;
+          let compMismatch = null;
+          const sylSample = [], sceneSample = [];
+          for (let i = 0; i < ALL_WORDS.length; i++) {
+            const it = ALL_WORDS[i];
+            renderWordProfile(it.w, meaningOfAny(it.w) || it.m);
+            const rows = Array.from(box.querySelectorAll('.wp-row')).map(r => ({
+              tag: r.querySelector('.wp-tag').textContent, val: r.querySelector('.wp-val').textContent }));
+            const code = wordCode(it.w), s = syllablesOf(it.w), sc = sceneOf(it.w);
+            if (code) root++;
+            else if (s) { syl++; if (sylSample.length < 25) sylSample.push(it.w); }
+            else neither++;
+            const assocRow = rows.find(r => r.tag.indexOf('联想') >= 0);
+            if (assocRow && assocRow.val && assocRow.val.length >= 4) assoc++;
+            const clozeVal = (box.querySelector('.wp-cloze .wp-val') || {}).textContent || '';
+            if (clozeVal.indexOf('____') >= 0) cloze++;
+            if (sc) {
+              sceneN++;
+              const want = sc + ' ' + (sceneHookOf(it.w) || '把画面记进这个词里');
+              if (assocRow && assocRow.val === want) sceneLinked++;
+              else if (!compMismatch) compMismatch = { w: it.w, got: assocRow ? assocRow.val : null, want: want };
+              if (sceneSample.length < 12) sceneSample.push(it.w);
+            }
+          }
+          /* 无词根 fallback 抽查：逐词重渲染，音节行必须为首行且与 syllablesOf 一致 */
+          const sylChecks = sylSample.map(w => {
+            renderWordProfile(w, meaningOfAny(w) || '');
+            const r0 = box.querySelector('.wp-row');
+            const tag = r0 ? r0.querySelector('.wp-tag').textContent : '';
+            const val = r0 ? r0.querySelector('.wp-val').textContent : '';
+            return { w: w, ok: tag.indexOf('音节') >= 0 && /^[a-z]+(·[a-z]+)+$/.test(val) && val === syllablesOf(w), val: val };
+          });
+          return { total: ALL_WORDS.length, root: root, syl: syl, neither: neither, assoc: assoc, cloze: cloze,
+            sceneN: sceneN, sceneLinked: sceneLinked, compMismatch: compMismatch, sylChecks: sylChecks };
+        });
+        ok('S18-G 词典全量 2909 词', g.total === 2909, g.total);
+        ok('S18-G 词根拆解覆盖 ' + g.root + '/' + g.total + '（≥500）', g.root >= 500, g.root);
+        ok('S18-G 无词根词音节 fallback 覆盖 ' + g.syl + ' 词（≥1700）', g.syl >= 1700, g.syl);
+        ok('S18-G 联想行 100% 覆盖（' + g.assoc + '/' + g.total + ' · 无词根无音节词走「闭上眼」兜底）',
+          g.assoc === g.total, g.assoc + '/' + g.total);
+        ok('S18-G 例句填空 100% 覆盖（' + g.cloze + '/' + g.total + ' · 按词性模板挖空 ____）',
+          g.cloze === g.total, g.cloze + '/' + g.total);
+        ok('S18-G 无词根 fallback 生效抽查 ≥20 词（实际 ' + g.sylChecks.length + ' · 音节行 a·b·c 格式与 syllablesOf 一致）',
+          g.sylChecks.length >= 20 && g.sylChecks.every(x => x.ok), JSON.stringify(g.sylChecks.filter(x => !x.ok)));
+        ok('S18-G 词景与联想行联动 100%（' + g.sceneLinked + '/' + g.sceneN + ' · 联想行首=词景 emoji+类别钩子）',
+          g.sceneN >= 300 && g.sceneLinked === g.sceneN, JSON.stringify(g.compMismatch || (g.sceneLinked + '/' + g.sceneN)));
+        /* 基线行（供后续轮次对比内容覆盖率，勿删除；与 SCENE-STATS 同期记录） */
+        console.log('PROFILE-STATS ' + JSON.stringify({ total: g.total, root: g.root,
+          rootPct: Math.round(g.root / g.total * 1000) / 10, sylFallback: g.syl, neither: g.neither,
+          assoc: g.assoc, cloze: g.cloze, scene: g.sceneN, sceneLinked: g.sceneLinked }));
+        ok('S18 全程零页面异常（迁移→学习→错题→复习→晋升→攻克→成熟→收口）', errors18.length === 0, errors18.join(' | '));
+        await c18.context.close();
       }
 
       /* ============ S-PERF · 性能预算基线（本地服务 · 每轮对比） ============ */

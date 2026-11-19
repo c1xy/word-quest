@@ -5657,8 +5657,11 @@ function openWordDetail(w) {
     stats.push('👀 见过 ' + m.seen + ' 次');
     stats.push('✅ 答对 ' + m.ok);
     stats.push('❌ 答错 ' + m.wrong);
-    stats.push('⏰ 下次复习 ' + humanizeDue(m.due - Date.now()));
+    /* 下次复习与「今日待复习」同源（r19 低危清账）：有间隔重复排程的词读 srs.due
+       （r17 起排程的唯一权威，分钟级 legacy mastery.due 与日阶梯档位会各说各话）；
+       未入学的词回落 legacy mastery.due */
     var se = (save.srs || {})[w];
+    stats.push('⏰ 下次复习 ' + humanizeDue((se ? se.due : m.due) - Date.now()));
     if (se) stats.push('🧠 记忆档位 ' + srsTierName(se.st) + (se.due <= Date.now() ? ' · 已到期' : ''));
   } else {
     stats.push('⬜ 还没学过这个词');
