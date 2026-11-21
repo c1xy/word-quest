@@ -28,7 +28,13 @@ function section(fromMark, toMark) {
 /* ---------- 词库数据（words.js 独立加载，同 src-check/poison-codec-test.js） ---------- */
 const wordsSrc = fs.readFileSync(path.join(ROOT, 'words.js'), 'utf8');
 const wordsBox = {};
-new Function('box', wordsSrc + '; box.WORD_LISTS = WORD_LISTS; box.ALL_WORDS = ALL_WORDS; box.MEANING_OF = MEANING_OF; box.EMOJI_OF = EMOJI_OF;')(wordsBox);
+new Function('box', wordsSrc + '; box.WORD_LISTS = WORD_LISTS; box.ALL_WORDS = ALL_WORDS; box.MEANING_OF = MEANING_OF; box.EMOJI_OF = EMOJI_OF;' +
+  ' box.CODE_ROOT_EXT = CODE_ROOT_EXT; box.CODE_PREFIX_EXT = CODE_PREFIX_EXT; box.CODE_SUFFIX_EXT = CODE_SUFFIX_EXT; box.CONFUSE_SEED = CONFUSE_SEED;')(wordsBox);
+
+/* ---------- 例句语料（sentences.js，r20：独立文件零依赖） ---------- */
+const sentencesSrc = fs.readFileSync(path.join(ROOT, 'sentences.js'), 'utf8');
+const sentBox = {};
+new Function('box', sentencesSrc + '; box.SENTENCES_OF = SENTENCES_OF;')(sentBox);
 
 /* ---------- 桩环境 ---------- */
 const toasts = [];
@@ -45,6 +51,8 @@ const env = {
   console, Math, Date, JSON, Promise, isNaN, parseInt, parseFloat,
   setTimeout, clearTimeout, setInterval, clearInterval,
   ALL_WORDS: wordsBox.ALL_WORDS, MEANING_OF: wordsBox.MEANING_OF, WORD_LISTS: wordsBox.WORD_LISTS,
+  CODE_ROOT_EXT: wordsBox.CODE_ROOT_EXT, CODE_PREFIX_EXT: wordsBox.CODE_PREFIX_EXT, CODE_SUFFIX_EXT: wordsBox.CODE_SUFFIX_EXT,
+  CONFUSE_SEED: wordsBox.CONFUSE_SEED, SENTENCES_OF: sentBox.SENTENCES_OF,
   EMOJI_OF: wordsBox.EMOJI_OF,            // r17 词景：EMOJI_OF 派生场景用
   posOf: function (m) { return (/^(n|v|adj|adv|prep|conj|pron)\b/.exec(m || '') || ['', ''])[1]; },   // clozeOf 词性判断（与 game.js 出题节同式）
   localStorage: (function () {
@@ -98,20 +106,28 @@ const secRelay   = section('/* ========================= 接力码', '/* =======
 const secRealm   = section('/* ========================= 词境工坊', '/* ========================= 分享卡');
 const secPoison  = section('/* ========================= 投毒挑战码', '/* ========================= 双人热座对决');
 const secGrade   = section('function gradeOf(', 'function endRunCore(reason)');   // r18：结算评级纯函数 + 评语表
+const secCode    = section('/* ========================= 词汇密码', '/* ========================= 词景');   // r20：词汇密码/词根扩容合并
+const secProfile = section('/* ========================= 记忆画像', '/* ========================= 设置');   // r20：例句语料/词族图谱
+const secConfuse = section('/* ========================= 易混词对比卡', 'function showScreen(id) {');   // r20：易混词挖掘/对比卡
+const secMemReport = section('/* ========================= 🧠 记忆报告', '/* ========================= 错题本');   // r20b：记忆报告数据面（due|0 截断回归钉）
 
 const loader = new Function('__env',
   'with (__env) {\n' +
+  secCode + '\n;__env.xCode = { parseCode, wordCode, wordFamily, wordClanOf, codeRootMean, codeDict, sentencesOf, blankWordIn, boldWordIn };\n' +
   secSave + '\n;__env.xSave = { defaultSave, loadSave, sanitizeSave, numOr, intOr, objOr, arrOr, ownKey, persistNow, persistCancel };\n' +
   secScene + '\n;__env.xScene = { sceneOf, sceneHookOf, sceneCatOf, syllablesOf, clozeOf, SCENE_CATS, SCENE_MEAN_MATCH, CLOZE_TPL };\n' +
   secConsts + '\n;__env.xConsts = { BOSS_MODS, IV_MIN, DIFFS, setBossMods: function (m) { BOSS_MODS = m; } };\n' +
   secRng + '\n' +
   secAch + '\n;__env.xAch = { ACH, checkAch, unlockAch, masteredCount, addXp, talentRankSum, TALENTS };\n' +
-  secMastery + '\n;__env.xMastery = { updateMastery, getM, bumpToday, srsGet, srsReview, srsDueList, srsCountToday, srsEndOfToday, srsTierName, startSrsReview, SRS_INTERVAL_DAYS, SRS_STAGE_MAX, SRS_TIERS, SRS_SESSION_MAX };\n' +
+  secMastery + '\n;__env.xMastery = { updateMastery, getM, bumpToday, srsGet, srsReview, fsrsReview, fsrsDerive, fsrsMult, fsrsRound1, srsDueList, srsCountToday, srsEndOfToday, srsTierName, startSrsReview, SRS_INTERVAL_DAYS, SRS_STAGE_MAX, SRS_TIERS, SRS_SESSION_MAX, FSRS_S_MAX };\n' +
   secDeflate + '\n;__env.xDeflate = { WQ_DEFLATE };\n' +
   secRelay + '\n;__env.xRelay = { RELAY_TEXT_PREFIX, RELAY_QR_MAX_URL, relayBuildPayload, relayParsePayload, relayBuildCode, relayTextToPayload, relayPlanShards, relayShardPayload, relayAcceptShard, relayPartsLoad, relayPartsClear, wqB64Enc, wqB64Dec, wqUtf8Enc, wqUtf8Dec, relaySanitizeSnapshot };\n' +
   secRealm + '\n;__env.xRealm = { REALM_TEXT_PREFIX, REALM_MAX_WORDS, sanitizeRealm, realmBuildPayload, realmParsePayload, realmBuildCode, realmTextToPayload, realmDraftBuild, realmCollectDraft, realmSampleSources, realmParseCustom };\n' +
   secPoison + '\n;__env.xPoison = { POISON_CHARS, pValidate, pChecksum, buildEnc, buildPoisonCode, decodePoisonCode, buildResultCode, decodeResultCode, encWords: function(){ return ENC_WORDS; }, encIndex: function(){ return ENC_INDEX; }, markPoisonSetPending, logPoison };\n' +
   secGrade + '\n;__env.xGrade = { gradeOf, GRADE_CAPS };\n' +
+  secProfile + '\n' +
+  secConfuse + '\n;__env.xConfuse = { editDistAtMost2, shareRoot, confusePairsOf, confuseCompareHtml, confuseDiffHtml, confuseSentenceHtml, injectConfuseCompare };\n' +
+  secMemReport + '\n;__env.xMemReport = { memReportData };\n' +
   '\n__env.xState = { getSave: function(){ return save; }, setRun: function(r){ run = r; }, getRun: function(){ return run; } };\n}');
 
 try { loader(env); } catch (e) {
@@ -123,8 +139,13 @@ const { BOSS_MODS, IV_MIN } = env.xConsts;
 const { ACH, checkAch } = env.xAch;
 const { updateMastery, getM } = env.xMastery;
 const X = env.xScene;                     // r17：词景/音节/例句
-const { srsGet, srsReview, srsDueList, srsCountToday, srsEndOfToday, srsTierName, startSrsReview,
-  SRS_INTERVAL_DAYS, SRS_STAGE_MAX, SRS_TIERS, SRS_SESSION_MAX } = env.xMastery;
+const { srsGet, srsReview, fsrsReview, fsrsDerive, fsrsMult, fsrsRound1, srsDueList, srsCountToday, srsEndOfToday, srsTierName, startSrsReview,
+  SRS_INTERVAL_DAYS, SRS_STAGE_MAX, SRS_TIERS, SRS_SESSION_MAX, FSRS_S_MAX } = env.xMastery;
+const XCode = env.xCode;                     // r20：词汇密码/例句/词族
+const XConfuse = env.xConfuse;               // r20：易混词
+const XMemReport = env.xMemReport;           // r20b：记忆报告数据面（due|0 截断回归钉）
+const SENTENCES_OF = env.SENTENCES_OF;       // r20：例句语料
+const CONFUSE_SEED = env.CONFUSE_SEED;
 const { WQ_DEFLATE } = env.xDeflate;
 const R = env.xRelay;
 const RM = env.xRealm;
@@ -238,7 +259,7 @@ console.log('---- B. 成就 ----');
 })();
 
 /* ================= C. SRS 排程边界（game.js:2166 updateMastery + IV_MIN:655） ================= */
-console.log('---- C. SRS 排程 ----');
+console.log('---- C. SRS 排程 ----'); console.log('DEBUG keys=', Object.keys(env.xState.getSave()).join(','));
 (function () {
   const save = env.xState.getSave();
   T('C1 IV_MIN 基准表 [0,5,30,720,2880,10080] 分钟', JSON.stringify(IV_MIN) === JSON.stringify([0, 5, 30, 12 * 60, 48 * 60, 7 * 24 * 60]), JSON.stringify(IV_MIN));
@@ -422,6 +443,258 @@ console.log('---- I. 词景/音节/例句（r17） ----');
   T('I16 例句按词性选模板（动词 abandon 用 v 模板）', X.CLOZE_TPL.v.indexOf(cz) >= 0, cz);
   T('I17 例句稳定（同词两次一致）', X.clozeOf('abandon') === cz);
   T('I18 无词性标注词走 any 模板兜底', X.CLOZE_TPL.any.indexOf(X.clozeOf('zzznotaword')) >= 0, X.clozeOf('zzznotaword'));
+})();
+
+/* ================= R. 词根词缀扩容库 + 例句语料 + 词族图谱 + 易混词对（r20 记忆科学二期） ================= */
+console.log('---- R. 词根扩容/例句语料/词族图谱/易混词（r20） ----');
+(function () {
+  const save = env.xState.getSave();
+  const EXT = env.CODE_ROOT_EXT, PEXT = env.CODE_PREFIX_EXT, SEXT = env.CODE_SUFFIX_EXT;
+  const D = env.MEANING_OF;
+  const baseRoots = XCode.codeDict().roots.filter(function (r) {
+    return EXT.every(function (e) { return e[0] !== r[0]; });
+  });
+
+  T('R1 扩容词根 ≥200 条（实际 ' + EXT.length + '）', EXT.length >= 200, EXT.length);
+  T('R2 每条 4 字段 [词根, 释义, 词源, 例词] 且均非空',
+    EXT.every(function (r) { return r.length === 4 && typeof r[0] === 'string' && r[0].length >= 2 && r.slice(1).every(function (x) { return typeof x === 'string' && x.length >= 1; }); }), '');
+  T('R3 扩容词根无重复 / 与基础清单无重叠', (function () {
+    const names = EXT.map(function (r) { return r[0]; });
+    const dupIn = names.filter(function (n, i) { return names.indexOf(n) !== i; });
+    const dupBase = names.filter(function (n) { return baseRoots.some(function (b) { return b[0] === n; }); });
+    return dupIn.length === 0 && dupBase.length === 0;
+  })(), '存在重复/重叠词根');
+  T('R4 每条例词：词典内 + 真实拆解含该词根（词典命中与拆解双重校验）', (function () {
+    const bad = [];
+    EXT.forEach(function (r) {
+      r[3].split('/').map(function (s) { return s.trim(); }).filter(Boolean).forEach(function (w) {
+        if (D[w] === undefined) { bad.push(r[0] + '→' + w + ' 不在词典'); return; }
+        const p = XCode.parseCode(w);
+        if (!p || p.roots.indexOf(r[0]) < 0) bad.push(r[0] + '→' + w + ' 拆解不含词根');
+      });
+    });
+    return bad.length === 0;
+  })(), '存在不合格例词');
+  T('R5 前缀扩展 ≥10 / 后缀扩展 ≥10 且带词源与例词',
+    PEXT.length >= 10 && SEXT.length >= 10 &&
+    PEXT.concat(SEXT).every(function (r) { return r.length === 4 && typeof r[1] === 'string' && r[1].length >= 1 && typeof r[2] === 'string' && r[2].length >= 4 && typeof r[3] === 'string' && r[3].length >= 4; }),
+    JSON.stringify({ P: PEXT.length, S: SEXT.length }));
+  T('R6 全库词根拆解覆盖 ≥1020（35%）——PROFILE-STATS ≥35% 的离线镜像', (function () {
+    let cov = 0;
+    env.ALL_WORDS.forEach(function (it) { if (XCode.wordCode(it.w)) cov++; });
+    return cov >= 1020 && cov / env.ALL_WORDS.length >= 0.35;
+  })(), '离线覆盖未达 35%');
+  T('R7 扩容词根并入词汇密码：describe → scrib(写) / correct → rect(直/正)',
+    XCode.wordCode('describe').indexOf('scrib') >= 0 && XCode.wordCode('correct').indexOf('rect') >= 0,
+    XCode.wordCode('describe') + ' | ' + XCode.wordCode('correct'));
+  T('R7b 词根释义查表走合并清单：codeRootMean("sper") 非空', XCode.codeRootMean('sper').length >= 1, XCode.codeRootMean('sper'));
+
+  /* 例句语料（sentences.js） */
+  const corpusKeys = Object.keys(SENTENCES_OF);
+  T('R8 例句语料 ≥500 词 × 每词 2 句', corpusKeys.length >= 500 && corpusKeys.every(function (k) { return SENTENCES_OF[k].length === 2; }),
+    corpusKeys.length);
+  T('R9 每条例句含目标词原形 + 句末标点 + 句长合理（挖空/揭晓交互依赖）', (function () {
+    const bad = [];
+    corpusKeys.forEach(function (k) {
+      SENTENCES_OF[k].forEach(function (s, i) {
+        if (!new RegExp('\\b' + k + '\\b', 'i').test(s)) bad.push(k + ' 句' + (i + 1) + ' 未含目标词');
+        if (!/[.!?]$/.test(s)) bad.push(k + ' 句' + (i + 1) + ' 缺句末标点');
+        if (s.length < 20 || s.length > 110) bad.push(k + ' 句' + (i + 1) + ' 句长越界');
+      });
+      if (D[k] === undefined) bad.push(k + ' 不在词典');
+    });
+    return bad.length === 0;
+  })(), '语料存在不合格例句');
+  T('R10 sentencesOf：语料词返回双句 / 未收录词回退 null（模板兜底不变）',
+    (XCode.sentencesOf('rigid') || []).length === 2 && XCode.sentencesOf('rigid')[1].length > 20 &&
+    XCode.sentencesOf('zzznotaword') === null, String(!!XCode.sentencesOf('rigid')));
+  T('R11 blankWordIn 大小写不敏感整词挖空 ____', XCode.blankWordIn('Rigid rules apply here.', 'rigid') === '____ rules apply here.' &&
+    XCode.blankWordIn('This is wedding season.', 'wedding') === 'This is ____ season.',
+    XCode.blankWordIn('Rigid rules apply here.', 'rigid'));
+  T('R12 boldWordIn 包 <b class="cc-hl"> 高亮', /<b class="cc-hl">rigid<\/b>/i.test(XCode.boldWordIn('A rigid rule applies.', 'rigid')),
+    XCode.boldWordIn('A rigid rule applies.', 'rigid'));
+
+  /* 词族图谱 */
+  T('R13 词族图谱：transport → port 词族，同根词全部真实可拆且含 port', (function () {
+    const clan = XCode.wordClanOf('transport', 8);
+    if (!clan || clan.root !== 'port') return false;
+    if (clan.total < 3) return false;
+    return clan.words.every(function (cw) {
+      const p = XCode.parseCode(cw);
+      return p && p.roots.indexOf('port') >= 0;
+    });
+  })(), JSON.stringify((XCode.wordClanOf('transport', 8) || {}).words));
+  T('R14 无词根词词族 = null（画像隐藏该行）', (function () {
+    const un = env.ALL_WORDS.find(function (x) { return !XCode.wordCode(x.w); });
+    return !!un && XCode.wordClanOf(un.w, 8) === null;
+  })(), '存在无词根词词族非 null');
+
+  /* 易混词对 */
+  T('R15 预置种子对 ≥5 且双词都在词典内', CONFUSE_SEED.length >= 5 &&
+    CONFUSE_SEED.every(function (s) { return D[s[0]] !== undefined && D[s[1]] !== undefined && typeof s[2] === 'string' && s[2].length >= 2; }),
+    CONFUSE_SEED.length);
+  T('R16 种子对回落：空错题本时 assure → ensure（来源「预置种子对」）', (function () {
+    save.wrongBook = {};
+    const pair = XConfuse.confusePairsOf('assure')[0];
+    return !!pair && pair.src === '预置种子对' && pair.b === 'ensure';
+  })(), JSON.stringify((XConfuse.confusePairsOf('insure')[0] || {})));
+  T('R17 错题本挖掘：双方错次 ≥1 且 形近 → 来源「错题本挖掘」', (function () {
+    save.wrongBook = { describe: { n: 3, t: 1 }, prescribe: { n: 1, t: 2 } };
+    const pair = XConfuse.confusePairsOf('describe')[0];
+    return !!pair && pair.src === '错题本挖掘' && pair.b === 'prescribe' && pair.score === 4;
+  })(), JSON.stringify((XConfuse.confusePairsOf('describe')[0] || {})));
+  T('R18 编辑距离 ≤2 判定：affect/effect 真、ascribe/describe 真、abandon/accurate 假',
+    XConfuse.editDistAtMost2('affect', 'effect') === true &&
+    XConfuse.editDistAtMost2('ascribe', 'describe') === true &&
+    XConfuse.editDistAtMost2('abandon', 'accurate') === false, '');
+  T('R19 同根判定：describe/prescribe 共享 scrib；无根词对为假', XConfuse.shareRoot('describe', 'prescribe') === true &&
+    XConfuse.shareRoot('abandon', 'accurate') === false, '');
+  T('R20 对比卡渲染：两词并列 + 差异字符高亮 + 来源标注 + 对比例句', (function () {
+    save.wrongBook = {};
+    const html = XConfuse.confuseCompareHtml('affect');
+    return html.indexOf('cc-grid') >= 0 && html.indexOf('cc-hl') >= 0 &&
+      html.indexOf('预置种子对') >= 0 && html.indexOf('effect') >= 0 && html.indexOf('cc-sent') >= 0;
+  })(), '');
+})();
+
+/* ================= M. 记忆报告数据面（r20b：due|0 32 位截断回归钉 + 分桶/热点语义） =================
+   回归背景：memReportData 曾写 e.due | 0，epoch 毫秒 >2^31 被按位截断——负值被 due>0
+   过滤（曲线全 0）、小正值全部塌缩进「今天」桶（双端试玩缺陷）。此处用真实 epoch
+   钉死：+2 天词必须落在 bucket[2]、逾期词落在 bucket[0]。 */
+console.log('---- M. 记忆报告数据面（r20b） ----');
+(function () {
+  const save = env.xState.getSave();
+  const DAY = 864e5;
+  Object.keys(save).forEach(function (k) { delete save[k]; });
+  Object.assign(save, env.xSave.defaultSave());
+
+  const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+  const now = Date.now();
+  save.srs = {
+    /* 逾期 2 天（双端试玩主场景：22 词均逾期 → 今天桶） */
+    abandon:   { st: 1, due: now - 2 * DAY, ok: 1, wrong: 1, t: 0 },
+    /* 未来 +1 / +2 / +6 天（epoch 均 >2^31，|0 会截断成小正/负数） */
+    absorb:    { st: 2, due: now + 1 * DAY, ok: 2, wrong: 0, t: 0 },
+    access:    { st: 3, due: now + 2 * DAY, ok: 3, wrong: 0, t: 0 },
+    account:   { st: 4, due: now + 6 * DAY, ok: 4, wrong: 0, t: 0 },
+    /* +7 天及更远 → 计入 +6 天桶（曲线语义：远期归末桶） */
+    accurate:  { st: 4, due: now + 7 * DAY, ok: 5, wrong: 0, t: 0 },
+    acknowledge:{ st: 4, due: now + 30 * DAY, ok: 5, wrong: 0, t: 0 },
+    /* due≤0 不进曲线（但计档位分布） */
+    acquire:   { st: 0, due: 0, ok: 0, wrong: 0, t: 0 },
+    /* 非词典词不计入任何统计 */
+    ghostword: { st: 1, due: now - DAY, ok: 1, wrong: 0, t: 0 }
+  };
+  save.wrongBook = {
+    abandon: { n: 2, t: 1 },   /* 错 2 次 × 逾期 2 天 → score 2×3=6 → Top1 */
+    absorb:  { n: 1, t: 1 },   /* 未逾期（due 未来）→ score 1×1=1 */
+    ghost:   { n: 9, t: 1 }    /* 非词典词不入热点 */
+  };
+
+  const d = XMemReport.memReportData();
+  T('M1 档位分布计数正确（含 due≤0 与 st 夹取）',
+    JSON.stringify(d.tiers) === JSON.stringify([1, 2, 1, 1, 3]),   /* ghostword 计档位分布（仅曲线过滤词典） */
+    JSON.stringify({ got: d.tiers }));
+  T('M2 逾期词计入「今天」桶（今天存量 = 1，曲线不全 0）', d.days[0] === 1, JSON.stringify(d.days));
+  T('M3 真实 epoch 分桶：+1/+2/+6 天各落位（due|0 截断会让 +2 塌缩进今天）',
+    d.days[1] === 1 && d.days[2] === 1 && d.days[6] === 3,   /* account/accurate/acknowledge 三词归末桶 */
+    JSON.stringify({ days: d.days, epochs: [now + DAY, now + 2 * DAY, now + 6 * DAY] }));
+  T('M4 曲线总量 = due>0 的词典词数（6），非词典词/due≤0 不计入',
+    d.dayTotal === 6, JSON.stringify({ total: d.dayTotal, days: d.days }));
+  T('M5 遗忘热点加权 = 错次 × (1 + 逾期天数)：abandon 2×3=6 居首',
+    d.hotspots.length === 2 && d.hotspots[0].w === 'abandon' && d.hotspots[0].score === 6 &&
+    d.hotspots[0].overdue === 2 && d.hotspots[1].w === 'absorb' && d.hotspots[1].score === 1,
+    JSON.stringify(d.hotspots));
+  T('M6 连续天数/今日已答/算法标注同源',
+    d.streak === 0 && d.todayCount === 0 && d.scheduler === 'SM-2 lite',
+    JSON.stringify({ streak: d.streak, today: d.todayCount, sched: d.scheduler }));
+  save.settings.scheduler = 'fsrs';
+  T('M7 FSRS 模式下算法标注切换（档位/曲线语义不变）', XMemReport.memReportData().scheduler === 'FSRS 简化版', '');
+  save.settings.scheduler = 'sm2';
+})();
+
+
+
+/* ================= H2. FSRS 简化版调度全矩阵（r20：设置分流/懒迁移/往返/白名单） ================= */
+console.log('---- H2. FSRS 简化版调度（r20） ----');
+(function () {
+  const save = env.xState.getSave();
+  const DAY = 864e5;
+  /* 环境复位：干净 defaultSave（settings.scheduler 字段齐全） */
+  Object.keys(save).forEach(function (k) { delete save[k]; });
+  Object.assign(save, env.xSave.defaultSave());
+
+  T('F1 默认调度算法 = sm2（defaultSave 兜底）', env.xSave.defaultSave().settings.scheduler === 'sm2', env.xSave.defaultSave().settings.scheduler);
+  T('F2 sanitize：scheduler 仅接受 fsrs，脏值/缺失一律回落 sm2',
+    env.xSave.sanitizeSave({ settings: { scheduler: 'fsrs' } }).settings.scheduler === 'fsrs' &&
+    env.xSave.sanitizeSave({ settings: { scheduler: 'garbage' } }).settings.scheduler === 'sm2' &&
+    env.xSave.sanitizeSave({ settings: {} }).settings.scheduler === 'sm2', '');
+  T('F3 fsrsMult 单调：D 越小增长越快 / D=10 时 1.15 保底增长', fsrsMult(1) > fsrsMult(5) && fsrsMult(5) > fsrsMult(10) && fsrsMult(10) === 1.15,
+    JSON.stringify([fsrsMult(1), fsrsMult(5), fsrsMult(10)]));
+
+  /* 生词 FSRS 链 */
+  save.settings.scheduler = 'fsrs';
+  save.srs = {}; delete save.mastery.abandon;
+  const t0 = Date.now();
+  updateMastery('abandon', true, false);
+  let e = srsGet('abandon');
+  T('F4 生词首答（FSRS）：st 0→1 / D 6→5.5 / S 1.2→1.6', e.st === 1 && e.d === 5.5 && e.s === 1.6, JSON.stringify({ st: e.st, d: e.d, s: e.s }));
+  T('F5 due ≈ now + 1.6 天（可提取性随 S 衰减 → 到期）', Math.abs(e.due - (t0 + 1.56 * DAY)) < DAY * 0.1, e.due - t0);
+  updateMastery('abandon', false, false);
+  e = srsGet('abandon');
+  T('F6 答错：D 5.5→7 / S 重置 1（round1(0.95)，再学习稳定性）/ st 1→0 / due=now',
+    e.d === 7 && e.s === 1 && e.st === 0 && e.due <= Date.now(), JSON.stringify({ d: e.d, s: e.s, st: e.st, due: e.due - Date.now() }));
+
+  /* 逐档到期序列：连答 6 次单调递增（与 SM-2 固定日阶梯 1/3/7/30/30 形成对照） */
+  save.srs = {}; delete save.mastery.abandon;
+  const seq = [];
+  for (let i = 0; i < 6; i++) {
+    updateMastery('abandon', true, false);
+    e = srsGet('abandon');
+    seq.push({ st: e.st, gap: Math.round((e.due - Date.now()) / DAY * 10) / 10 });
+  }
+  T('F7 FSRS 逐档到期序列单调递增（首档 ≥1 天）', seq.every(function (x, i) { return i === 0 ? x.gap >= 1 : x.gap > seq[i - 1].gap; }),
+    JSON.stringify(seq));
+  T('F8 st 档位照常晋升至成熟封顶 4（显示语义与 SM-2 一致）', seq[seq.length - 1].st === 4, seq[seq.length - 1].st);
+  T('F9 S 封顶 365 天', (function () {
+    srsGet('abandon').s = 380; srsGet('abandon').d = 5;
+    updateMastery('abandon', true, false);
+    return srsGet('abandon').s === FSRS_S_MAX && FSRS_S_MAX === 365;
+  })(), srsGet('abandon').s);
+
+  /* 老档平滑迁移 + 双向往返 */
+  save.srs = {};
+  save.srs.abandon = { st: 2, due: Date.now() + 3 * DAY, ok: 2, wrong: 0, t: Date.now() };   /* SM-2 时代档 */
+  updateMastery('abandon', true, false);
+  e = srsGet('abandon');
+  T('F10 首次切 FSRS 懒派生：D=7-st=5 / S=剩余到期天数 3', e.d === 4.5 && Math.abs((e.s / fsrsMult(5)) - 3) < 0.06,
+    JSON.stringify({ d: e.d, s: e.s }));
+  T('F11 派生后答对：S=3×mult(5)→4.2 / st 2→3 / due 按 S 排', e.s === 4.2 && e.st === 3, JSON.stringify({ s: e.s, st: e.st }));
+  const dKeep = e.d, sKeep = e.s;
+  save.settings.scheduler = 'sm2';
+  const tSM = Date.now();
+  updateMastery('abandon', true, false);
+  e = srsGet('abandon');
+  T('F12 切回 SM-2：st 3→4 / due=+30 天（原 srs 字段零丢失）', e.st === 4 && Math.abs(e.due - (tSM + 30 * DAY)) < 2000, JSON.stringify({ st: e.st, due: e.due - tSM }));
+  T('F13 FSRS 字段留存且 SM-2 不改写 d/s', e.d === dKeep && e.s === sKeep, JSON.stringify({ d: e.d, s: e.s }));
+  save.settings.scheduler = 'fsrs';
+  updateMastery('abandon', true, false);
+  e = srsGet('abandon');
+  T('F14 再切 FSRS 续跑：S 从留存值继续拉长（不重派生）', e.s === fsrsRound1(sKeep * fsrsMult(dKeep)),
+    JSON.stringify({ s: e.s, want: fsrsRound1(sKeep * fsrsMult(dKeep)) }));
+
+  /* sanitize 白名单：d/s 脏值夹取 + 旧档形态不变 + __proto__ 纪律 */
+  const s1 = env.xSave.sanitizeSave({ srs: {
+    abandon: { st: 2, due: 123, ok: 1, wrong: 0, t: 5, d: 99, s: 'x' },
+    ability: { st: 1, due: 1, ok: 0, wrong: 0, t: 0, d: -2, s: 0 },
+    absorb: { st: 1, due: 2, ok: 0, wrong: 0, t: 0 },
+    __proto__: { d: 1, s: 2 }
+  } });
+  T('F15 d 夹取 [1,10] / s 脏字符串默认 1', s1.srs.abandon.d === 10 && s1.srs.abandon.s === 1, JSON.stringify(s1.srs.abandon));
+  T('F16 d 负数夹 1 / s 下限 0.1', s1.srs.ability.d === 1 && s1.srs.ability.s === 0.1, JSON.stringify(s1.srs.ability));
+  T('F17 旧档无 d/s 字段 → 保持原五字段形态（向后兼容）', !('d' in s1.srs.absorb) && !('s' in s1.srs.absorb), JSON.stringify(s1.srs.absorb));
+  const protoT = {};
+  T('F18 __proto__ 原型污染拦截（沿用 sanitizeSave 纪律）', !Object.prototype.hasOwnProperty.call(s1.srs, '__proto__') && protoT.d === undefined, '');
 })();
 
 /* ================= D. 挑战码 / 成绩码（整合自 src-check/poison-codec-test.js 场景 1-10） ================= */

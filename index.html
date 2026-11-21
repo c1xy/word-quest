@@ -27,7 +27,7 @@
   });
 })();
 </script>
-<link rel="stylesheet" href="style.css?v=20261119b">
+<link rel="stylesheet" href="style.css?v=20261121b">
 </head>
 <body>
 <div id="app">
@@ -125,6 +125,7 @@
       </div>
       <div class="menu-row">
         <button class="btn btn-small btn-primary" id="btn-wrongbook">📕 错题本</button>
+        <button class="btn btn-small" id="btn-memreport">🧠 记忆报告</button>
         <button class="btn btn-small" id="btn-codex">📖 单词图鉴</button>
         <button class="btn btn-small" id="btn-ach">🏆 成就</button>
         <button class="btn btn-small" id="btn-talent">✨ 天赋</button>
@@ -375,6 +376,24 @@
       <div class="setup-actions">
         <button class="btn btn-small btn-primary" id="btn-drill">🔥 开始强化训练</button>
         <button class="btn btn-small" id="btn-wrong-back">← 返回</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 🧠 记忆报告（r20 记忆科学二期） ============ -->
+  <section class="screen" id="scr-memreport" tabindex="-1">
+    <div class="panel wide">
+      <h2 class="panel-title">🧠 记忆报告</h2>
+      <div class="mr-streak" id="mr-streak"></div>
+      <h3 class="section-title">📊 记忆档位分布</h3>
+      <div class="mr-tiers" id="mr-tiers"></div>
+      <h3 class="section-title">📈 未来 7 天到期曲线</h3>
+      <canvas class="mr-canvas" id="mr-canvas" width="560" height="180" role="img" aria-label="未来 7 天到期单词数量柱状图"></canvas>
+      <p class="hint" id="mr-due-total"></p>
+      <h3 class="section-title">🔥 遗忘热点 Top10（错次 × 逾期加权）</h3>
+      <div class="mr-hotspots" id="mr-hotspots"></div>
+      <div class="setup-actions">
+        <button class="btn btn-small" id="btn-memreport-back">← 返回</button>
       </div>
     </div>
   </section>
@@ -632,6 +651,13 @@
         </select>
       </label>
 
+      <label class="setting-row"><span>🔁 调度算法（间隔重复）</span>
+        <select id="set-sched" class="plan-select">
+          <option value="sm2" selected>SM-2 lite（日阶梯·默认）</option>
+          <option value="fsrs">FSRS 简化版（难度×稳定）</option>
+        </select>
+      </label>
+
       <h3 class="section-title">🎮 题型开关</h3>
       <label class="setting-row"><span>🇨🇳 看中文 → 选英文</span><input type="checkbox" id="qt-c2e" checked></label>
       <label class="setting-row"><span>🇬🇧 看英文 → 选中文</span><input type="checkbox" id="qt-e2c" checked></label>
@@ -661,6 +687,11 @@
         <p><b>🪙 金币怎么用？</b>答题和连击赚金币，过关后到商店买药水、护盾、提示卡，或购买永久强化（血量上限、答题时限、初始护盾、金币加成）。</p>
         <p><b>📖 复习模式</b>不扣血、没压力，专门刷低掌握度和易错的词，适合考前突击。</p>
         <p><b>🧠 今日待复习（间隔重复）</b>主页「📅 每日仪式 → 🧠 今日待复习」：生词与错题按记忆档位 <b>新词 → 1 天 → 3 天 → 7 天 → 成熟</b> 自动排程——新词答对明天见，一路晋升到成熟档（之后每 30 天回归一次保持长时记忆）；答错降一档并且当天就回队列。按钮上直接写「今日到期 N 词」，没有到期词时会明确告诉你今天可以休息；复习不扣血，答对晋升 ⬆️ / 答错降档 ⬇️ 都会记进档案。所有模式的作答（冒险/计划/听写/实验室…）都会自动排进这套日程，无需单独开关。</p>
+        <p><b>🔁 调度算法（SM-2 lite / FSRS 简化版）</b>设置页可选间隔重复算法：<b>SM-2 lite</b>（默认）按固定日阶梯排程；<b>FSRS 简化版</b>用「难度 D（1-10）× 稳定性 S（天）」双参数建模——可提取性随 S 衰减，答对 S 按难度拉长（越简单的词隔得越久）、D 微降；答错 D 上调、S 重置为更短的再学习稳定性，错词当天回队列。老档平滑迁移：首次切到 FSRS 后每词在下次作答时从原档位/到期时间自动换算 D/S（不一次性重写存档）；切回 SM-2 原档位与到期时间原样保留，FSRS 参数留存可续用——双向切换零丢失。档位显示语义两种算法完全一致。</p>
+        <p><b>🧠 记忆报告</b>主页「🧠 记忆报告」：本地记忆数据的仪表盘——<b>记忆档位分布</b>（新词/1 天/3 天/7 天/成熟各多少词在排程）、<b>未来 7 天到期曲线</b>（canvas 柱状图，今日存量含已逾期）、<b>遗忘热点 Top10</b>（错题本错次 × 逾期天数加权排序，点击直达该词画像）、<b>连续学习天数</b>（打卡 streak + 今日已答题数）。全部纯本地计算，与存档严格同源。</p>
+        <p><b>⚖️ 易混词对比卡</b>复习会话答错时弹出的记忆卡、以及图鉴词详情卡会附上「易混词对比」：两词并列、差异字符红色高亮、各配一条例句。数据优先从你的错题本挖掘（两词都答错过且形近（编辑距离 ≤ 2）或同根词根），错题数据不足时回落到内置预置种子对（affect/effect、principal/principle、adopt/adapt…，卡片上标注来源）。</p>
+        <p><b>🌳 同根词族图谱</b>词详情卡「记忆画像」新增词族行：以该词的主词根为圆心，放射列出词典内共享词根的同根词（R20 词根库扩容到 360+ 词条后覆盖大幅上升），点击任意同根词块直接跳到它的画像——像看族谱一样一次吃透一串词。无词根的词自动隐藏该行。</p>
+        <p><b>✍️ 双例句切换</b>「高频核心 500」主题包的词在记忆画像里配了两条真实语境例句：挖空目标词练回忆，「🔁 换一句」在两条语料间切换，首字母提示与揭晓照常可用。未收录例句库的词仍走词性模板句（兜底不变）。</p>
         <p><b>🖼️ 词景与记忆画像</b>具象词（动物/食物/天气/动作/场所/情绪/自然/人物）在题面与词详情卡显示 <b>2-3 个 emoji 组成的词景小场景</b>（看中选英这类「词就是答案」的题型不会自动显示，防泄题）。词详情弹层新增「记忆画像」区：<b>词根/词缀拆解</b>（无词根词自动改用音节拆分）+ <b>联想提示一行</b> + <b>例句填空</b>（挖空目标词，可展开首字母提示再揭晓）。每局结算页还有「📌 本次最该记住的 3 词」三词卡——错词优先、低正确率词补位，点击直达该词的记忆画像。</p>
         <p><b>✨ 战斗反馈特效</b>答对在怪物位置<b>炸开一簇金色光点</b>（连击越高簇越大）；3/6/10 连时屏幕边缘亮起<b>金色光晕</b>、答错即回落；BOSS 出场从天而降、受击一拍切换「苦脸表情」约半秒后回正；结算页盖上 <b>S/A/B/C 评级徽章</b>（S=≥5 题全对 / A=≥90% / B=≥70%，撤退局封顶 B 不授勋，S/A 级全屏撒花）；主页与战斗背景<b>双层景深视差</b>随指针流动。全部动画只走合成层，系统开启「减少动态效果」时自动关闭。</p>
         <p><b>♾️ 无尽挑战</b>主页「♾️ 无尽挑战」：冒险的极限形态——无商店、无关卡喘息，答题时限与敌军推进随击杀数不断收紧；每击杀 10 只压境 -6% 回一口气，比拼单局最高击杀数（战绩入档，单局 50 只解锁「无尽霸主」成就），适合冲连击与极限生存。</p>
@@ -699,6 +730,7 @@
       <div class="memcard-meaning" id="mem-meaning">释义</div>
       <div class="memcard-code" id="mem-code" hidden></div>
       <div class="mem-family" id="mem-family" hidden></div>
+      <div class="mem-confuse" id="mem-confuse" hidden></div>
       <button class="btn btn-tiny" id="mem-speak-btn" hidden>🎤 跟读挑战 +5🪙</button>
       <button class="btn btn-primary" id="mem-ok">记住了，继续战斗！</button>
     </div>
@@ -720,6 +752,7 @@
       <div class="mem-family" id="wo-family" hidden></div>
       <div class="wo-stats" id="wo-stats"></div>
       <div class="wo-profile" id="wo-profile" hidden></div>
+      <div class="wo-confuse" id="wo-confuse" hidden></div>
       <div class="spell-actions">
         <button class="btn btn-tiny btn-primary" id="wo-master">⭐ 标记已掌握</button>
         <button class="btn btn-tiny" id="wo-reset">♻️ 重置记录</button>
@@ -822,8 +855,9 @@
 
 </div>
 
-<script src="libs/qrcode.min.js?v=20261119b"></script>
-<script src="words.js?v=20261119b"></script>
-<script src="game.js?v=20261119b"></script>
+<script src="libs/qrcode.min.js?v=20261121b"></script>
+<script src="words.js?v=20261121b"></script>
+<script src="sentences.js?v=20261121b"></script>
+<script src="game.js?v=20261121b"></script>
 </body>
 </html>

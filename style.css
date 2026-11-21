@@ -1931,3 +1931,46 @@ a.btn { text-decoration: none; display: inline-block; }
 }
 .speak-status .heard { color: var(--c-accent); font-weight: 800; }
 .speak-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+/* ============ R20 记忆科学二期 ============ */
+/* 🧠 记忆报告 */
+.mr-streak { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 6px 0 4px; }
+.mr-tiers { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 2px; }
+.mr-tier { display: flex; align-items: center; gap: 8px; }
+.mr-tier-name { width: 52px; text-align: right; font-size: 12px; color: var(--c-sub); flex: none; }
+.mr-tier-bar { flex: 1; height: 14px; border-radius: 7px; background: rgba(127, 140, 170, .18); overflow: hidden; }
+.mr-tier-bar i { display: block; height: 100%; border-radius: 7px; background: linear-gradient(90deg, var(--c-accent), #e0a45c); transition: width var(--t-dur, .25s) var(--t-ease, ease); }
+.mr-tier-n { width: 40px; font-size: 12px; text-align: left; flex: none; }
+.mr-canvas { width: 100%; max-width: 560px; height: auto; display: block; margin: 4px auto 0; border-radius: 10px; background: rgba(20, 26, 40, .35); }
+.mr-hotspots { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.mr-hot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; text-align: left; width: 100%;
+  padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(127, 140, 170, .25);
+  background: rgba(127, 140, 170, .08); cursor: pointer; }
+.mr-hot:hover, .mr-hot:focus-visible { border-color: var(--c-accent); }
+.mr-hot-word { font-weight: 800; font-size: 14px; }
+.mr-hot-mean { color: var(--c-sub); font-size: 12px; flex: 1; min-width: 120px; }
+.mr-hot-score { font-size: 11px; color: var(--c-accent); font-weight: 700; }
+/* 词族行（记忆画像 r20） */
+.wp-clan .wp-val { line-height: 1.9; }
+.clan-root { color: var(--c-accent); font-weight: 800; margin-right: 2px; }
+.clan-mean { color: var(--c-sub); font-style: normal; font-size: 11px; margin-right: 6px; }
+.clan-chip { display: inline-block; margin: 1px 4px 1px 0; padding: 1px 8px; border-radius: 999px;
+  border: 1px solid rgba(127, 140, 170, .35); background: rgba(127, 140, 170, .12);
+  color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.clan-chip:hover, .clan-chip:focus-visible { border-color: var(--c-accent); color: var(--c-accent); }
+.clan-more, .clan-none { color: var(--c-sub); font-style: normal; font-size: 11px; }
+.cloze-word { color: var(--c-accent); }
+.cloze-idx { font-size: 10px; color: var(--c-sub); }
+/* 易混词对比卡（r20） */
+.mem-confuse, .wo-confuse { margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(127, 140, 170, .3); }
+.cc-title { font-size: 12px; color: var(--c-sub); margin-bottom: 6px; }
+.cc-src { color: var(--c-accent); font-size: 11px; }
+.cc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.cc-col { padding: 8px; border-radius: 10px; background: rgba(127, 140, 170, .1); min-width: 0; }
+.cc-word { display: block; width: 100%; text-align: center; font-size: 15px; font-weight: 800;
+  letter-spacing: .04em; background: none; border: none; color: inherit; cursor: pointer;
+  padding: 2px 0; word-break: break-all; }
+.cc-word:hover, .cc-word:focus-visible { color: var(--c-accent); }
+.cc-hl { color: #e5484d; font-weight: 800; padding: 0 1px; }
+.cc-sent { margin-top: 6px; font-size: 11px; line-height: 1.6; color: var(--c-sub); }
+.cc-sent .cc-hl { color: var(--c-accent); }

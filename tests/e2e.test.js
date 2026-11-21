@@ -2040,9 +2040,11 @@ if (!resolvable) {
               clozeVal: (document.querySelector('.wp-cloze .wp-val') || {}).textContent || ''
             };
           });
-          ok('S16-D 记忆画像三行结构（拆解/联想/例句）', prof1.rows.length === 3 &&
-            prof1.rows[0].tag.indexOf('拆解') >= 0 && prof1.rows[1].tag.indexOf('联想') >= 0 && prof1.rows[2].tag.indexOf('例句') >= 0,
+          ok('S16-D 记忆画像四行结构（拆解/联想/例句/词族 · r20 新增词族行）', prof1.rows.length === 4 &&
+            prof1.rows[0].tag.indexOf('拆解') >= 0 && prof1.rows[1].tag.indexOf('联想') >= 0 && prof1.rows[2].tag.indexOf('例句') >= 0 && prof1.rows[3].tag.indexOf('词族') >= 0,
             JSON.stringify(prof1.rows));
+          ok('S16-D 词族行：port 词根 + 同根词放射列表（点击互跳）',
+            prof1.rows[3].val.indexOf('port') >= 0 && prof1.rows[3].val.length > 10, prof1.rows[3].val);
           ok('S16-D transport 拆解行复用词汇密码（含 trans/port）',
             prof1.rows[0].val.indexOf('trans') >= 0 && prof1.rows[0].val.indexOf('port') >= 0, prof1.rows[0].val);
           ok('S16-D 联想行带词景或钩子（非空）', prof1.rows[1].val.length >= 4, prof1.rows[1].val);
@@ -2721,9 +2723,9 @@ if (!resolvable) {
            「2 天后」，与档位徽章/入口队列各说各话） */
         ok('S18-F 「⏰ 下次复习」读排程 srs.due（成熟档 30 天后 · 与今日待复习同口径）',
           fWo.chips.some(c => c.indexOf('⏰ 下次复习 30 天后') >= 0), JSON.stringify(fWo.chips));
-        ok('S18-F 记忆画像三行在位（拆解/联想/例句）',
-          fWo.rows.length === 3 && fWo.rows[0].tag.indexOf('拆解') >= 0 &&
-          fWo.rows[1].tag.indexOf('联想') >= 0 && fWo.rows[2].tag.indexOf('例句') >= 0, JSON.stringify(fWo.rows));
+        ok('S18-F 记忆画像四行在位（拆解/联想/例句/词族 · r20 词族行新增）',
+          fWo.rows.length === 4 && fWo.rows[0].tag.indexOf('拆解') >= 0 &&
+          fWo.rows[1].tag.indexOf('联想') >= 0 && fWo.rows[2].tag.indexOf('例句') >= 0 && fWo.rows[3].tag.indexOf('词族') >= 0, JSON.stringify(fWo.rows));
         ok('S18-F 拆解行复用词汇密码（trans/port）', fWo.rows[0].val.indexOf('trans') >= 0 && fWo.rows[0].val.indexOf('port') >= 0, fWo.rows[0].val);
         await page.click('#wo-close');
         await page.click('#btn-codex-back');
@@ -2799,8 +2801,11 @@ if (!resolvable) {
             sceneN: sceneN, sceneLinked: sceneLinked, compMismatch: compMismatch, sylChecks: sylChecks };
         });
         ok('S18-G 词典全量 2909 词', g.total === 2909, g.total);
-        ok('S18-G 词根拆解覆盖 ' + g.root + '/' + g.total + '（≥500）', g.root >= 500, g.root);
-        ok('S18-G 无词根词音节 fallback 覆盖 ' + g.syl + ' 词（≥1700）', g.syl >= 1700, g.syl);
+        /* R20 词根扩容后锁定 ≥1020 词（35%）——r19 基线 549（18.9%），扩容库见 words.js CODE_ROOT_EXT；
+           音节 fallback 随词根覆盖上移同步下调（r19 基线 1815，大量词由音节兜底升级为词根拆解） */
+        ok('S18-G 词根拆解覆盖 ' + g.root + '/' + g.total + '（R20 锁定 ≥1020 = 35%）', g.root >= 1020, g.root);
+        ok('S18-G 覆盖守恒：词根 + 音节 + 双无 = ' + g.total, g.root + g.syl + g.neither === g.total, g.root + '+' + g.syl + '+' + g.neither);
+        ok('S18-G 无词根词音节 fallback 覆盖 ' + g.syl + ' 词（R20 下调 ≥1100）', g.syl >= 1100, g.syl);
         ok('S18-G 联想行 100% 覆盖（' + g.assoc + '/' + g.total + ' · 无词根无音节词走「闭上眼」兜底）',
           g.assoc === g.total, g.assoc + '/' + g.total);
         ok('S18-G 例句填空 100% 覆盖（' + g.cloze + '/' + g.total + ' · 按词性模板挖空 ____）',
@@ -2815,6 +2820,209 @@ if (!resolvable) {
           assoc: g.assoc, cloze: g.cloze, scene: g.sceneN, sceneLinked: g.sceneLinked }));
         ok('S18 全程零页面异常（迁移→学习→错题→复习→晋升→攻克→成熟→收口）', errors18.length === 0, errors18.join(' | '));
         await c18.context.close();
+      }
+
+      /* ============ S19 · 记忆科学二期（r20）：FSRS 调度 / 易混词对比卡 / 词族图谱 / 双例句 / 记忆报告 ============ */
+      console.log('---- S19 记忆科学二期（r20） ----');
+      {
+        const seed19 = baseSave();
+        seed19.mastery.abandon = { lv: 1, seen: 2, ok: 1, wrong: 1, last: 1700000000000, due: 0, wrongStreak: 0 };
+        seed19.srs = {
+          abandon: { st: 1, due: Date.now() - 864e5, ok: 1, wrong: 1, t: Date.now() - 864e5 },
+          absorb: { st: 2, due: Date.now() + 2 * 864e5, ok: 2, wrong: 0, t: Date.now() - 3 * 864e5 },
+          access: { st: 0, due: Date.now() - 1000, ok: 0, wrong: 1, t: Date.now() - 864e5 }
+        };
+        seed19.wrongBook = {
+          abandon: { n: 2, t: Date.now() - 864e5 },
+          absorb: { n: 1, t: Date.now() - 2 * 864e5 },
+          access: { n: 1, t: Date.now() - 864e5 }
+        };
+        seed19.streak = { count: 5, last: new Date().toDateString(), todayCount: 7 };
+        const c19 = await newContext(browser, seed19);
+        const errors19 = [];
+        c19.page.on('pageerror', e => errors19.push(e.message));
+        const page = c19.page;
+        const diskSave19 = () => page.evaluate(() => {
+          if (typeof persistFlush === 'function') persistFlush();
+          return JSON.parse(localStorage.getItem('wq_save_v1'));
+        });
+
+        /* ---------- A. 调度算法：设置页 select + FSRS 切换落盘 + d/s 双参数 + 往返 ---------- */
+        await gotoHome(page);
+        await page.click('#btn-settings');
+        await page.waitForSelector('#scr-settings.active', { timeout: 8000 });
+        const schedA = await page.evaluate(() => ({
+          exists: !!document.getElementById('set-sched'),
+          value: document.getElementById('set-sched').value,
+          options: Array.from(document.getElementById('set-sched').options).map(o => o.value)
+        }));
+        ok('S19-A 设置页『调度算法』存在且默认 sm2', schedA.exists && schedA.value === 'sm2' &&
+          schedA.options.indexOf('fsrs') >= 0, JSON.stringify(schedA));
+        await page.selectOption('#set-sched', 'fsrs');
+        await page.waitForTimeout(300);
+        const schedB = await (await diskSave19()).settings.scheduler;
+        ok('S19-A 切 FSRS 后 settings.scheduler 落盘为 fsrs', schedB === 'fsrs', schedB);
+        /* 页内真实作答（走真实 updateMastery 链路）：老档懒派生 + 双参数落盘 */
+        const fsrsAns = await page.evaluate(() => {
+          updateMastery('abandon', true, false);
+          if (typeof persistFlush === 'function') persistFlush();   /* persist 是防抖写，断言前先冲盘 */
+          const e = (JSON.parse(localStorage.getItem('wq_save_v1')).srs || {}).abandon;
+          return { d: e.d, s: e.s, st: e.st, dueGapDays: (e.due - Date.now()) / 864e5 };
+        });
+        ok('S19-A FSRS 作答落盘 D/S 双参数（D∈[1,10] / S>0 / due=now+S 天）',
+          fsrsAns.d >= 1 && fsrsAns.d <= 10 && fsrsAns.s > 0 && Math.abs(fsrsAns.dueGapDays - fsrsAns.s) < 0.2,
+          JSON.stringify(fsrsAns));
+        await page.selectOption('#set-sched', 'sm2');
+        await page.waitForTimeout(300);
+        const sm2Back = await page.evaluate(() => {
+          updateMastery('abandon', true, false);   /* SM-2 日阶梯：FSRS 期已晋 st=2 → 答对晋升 3，due=+7 天 */
+          if (typeof persistFlush === 'function') persistFlush();
+          const after = (JSON.parse(localStorage.getItem('wq_save_v1')).srs || {}).abandon;
+          return { st: after.st, dueGapDays: (after.due - Date.now()) / 864e5, dKept: after.d, sKept: after.s };
+        });
+        ok('S19-A 切回 SM-2：st 照常晋升 / due=+7 天日阶梯 / FSRS d/s 字段留存不改写',
+          sm2Back.st === 3 && Math.abs(sm2Back.dueGapDays - 7) < 0.05 && sm2Back.dKept !== undefined && sm2Back.sKept !== undefined,
+          JSON.stringify(sm2Back));
+        await page.click('#btn-settings-back');
+        await backHome(page);
+
+        /* ---------- B. 易混词对比卡（词详情 + 复习会话记忆卡槽位） ---------- */
+        await page.click('#btn-codex');
+        await page.waitForSelector('#scr-codex.active', { timeout: 8000 });
+        await page.evaluate(() => openWordDetail('affect'));
+        await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 5000 });
+        const cc = await page.evaluate(() => {
+          const el = document.getElementById('wo-confuse');
+          const grid = el.querySelector('.cc-grid');
+          const cols = el.querySelectorAll('.cc-col');
+          const src = el.querySelector('.cc-src');
+          return {
+            visible: !el.hidden,
+            cols: cols.length,
+            hl: el.querySelectorAll('.cc-hl').length,
+            src: src ? src.textContent : '',
+            hasEffect: el.textContent.indexOf('effect') >= 0,
+            sents: el.querySelectorAll('.cc-sent').length
+          };
+        });
+        ok('S19-B 词详情易混词对比卡：两词并列 + 差异字符高亮 + 来源标注 + 对比例句',
+          cc.visible && cc.cols === 2 && cc.hl >= 2 && cc.src.indexOf('预置种子对') >= 0 &&
+          cc.hasEffect && cc.sents === 2, JSON.stringify(cc));
+        await page.evaluate(() => closeWordOverlay());
+        const memConfuse = await page.evaluate(() => {
+          run = { mode: 'srs', ended: false };          /* 模拟复习会话上下文（仅验证槽位渲染，不开真实战局） */
+          const shown = injectConfuseCompare('affect', 'mem-confuse', true);
+          const vis = !document.getElementById('mem-confuse').hidden;
+          run = undefined;                              /* 还原，防污染后续用例 */
+          injectConfuseCompare('affect', 'mem-confuse', true);
+          const hiddenBack = document.getElementById('mem-confuse').hidden;
+          return { shown: shown, vis: vis, hiddenBack: hiddenBack };
+        });
+        ok('S19-B 复习会话（run.mode=srs）记忆卡注入对比卡 / 非 srs 槽位隐藏',
+          memConfuse.shown && memConfuse.vis && memConfuse.hiddenBack, JSON.stringify(memConfuse));
+
+        /* ---------- C. 同根词族图谱（词族行 + 点击互跳） ---------- */
+        await page.evaluate(() => openWordDetail('transport'));
+        await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 5000 });
+        const clan = await page.evaluate(() => {
+          const row = document.querySelector('#wo-profile .wp-clan');
+          if (!row) return null;
+          const chips = Array.from(row.querySelectorAll('.clan-chip'));
+          return {
+            visible: row.offsetParent !== null,
+            root: (row.querySelector('.clan-root') || {}).textContent || '',
+            chips: chips.length,
+            first: chips.length ? chips[0].dataset.w : ''
+          };
+        });
+        ok('S19-C 词族行可见：port 词根 + 同根词放射列表（≥3 块可跳）',
+          !!clan && clan.visible && clan.root === 'port' && clan.chips >= 3, JSON.stringify(clan));
+        await page.evaluate(() => {
+          const chip = document.querySelector('#wo-profile .wp-clan .clan-chip');
+          chip.click();                                  /* 点击同根词块 → 互跳画像 */
+        });
+        const jumped = await page.evaluate(() => document.getElementById('wo-word').textContent.trim());
+        ok('S19-C 点击同根词块互跳画像（wo-word 变为同根词 ' + jumped + '）', jumped && jumped !== 'transport' &&
+          jumped.indexOf('transport') < 0, jumped);
+        await page.evaluate(() => closeWordOverlay());
+
+        /* ---------- D. 双例句切换（语料词 rigid） ---------- */
+        await page.evaluate(() => openWordDetail('rigid'));
+        await page.waitForSelector('#word-overlay:not([hidden])', { timeout: 5000 });
+        const sent1 = await page.evaluate(() => ({
+          cloze: (document.querySelector('#wo-profile .wp-cloze .wp-val') || {}).textContent || '',
+          idx: (document.querySelector('#wo-profile .cloze-idx') || {}).textContent || '',
+          hasNext: !!document.getElementById('wo-cloze-next')
+        }));
+        await page.click('#wo-cloze-next');
+        const sent2 = await page.evaluate(() => ({
+          cloze: (document.querySelector('#wo-profile .wp-cloze .wp-val') || {}).textContent || '',
+          idx: (document.querySelector('#wo-profile .cloze-idx') || {}).textContent || ''
+        }));
+        ok('S19-D 语料词双例句：句 1 挖空 ____ + 指示 1/2 → 换一句后 2/2 且句面变化',
+          sent1.cloze.indexOf('____') >= 0 && sent1.idx === '1/2' && sent1.hasNext &&
+          sent2.idx === '2/2' && sent2.cloze !== sent1.cloze && sent2.cloze.indexOf('____') >= 0,
+          JSON.stringify({ s1: sent1, s2: sent2 }));
+        await page.evaluate(() => closeWordOverlay());
+        await page.click('#btn-codex-back');
+        await backHome(page);
+
+        /* ---------- E. 🧠 记忆报告（与 localStorage 严格同源） ---------- */
+        ok('S19-E 主页新增 🧠 记忆报告 入口', await page.evaluate(() => !!document.getElementById('btn-memreport')), '');
+        await page.click('#btn-memreport');
+        await page.waitForSelector('#scr-memreport.active', { timeout: 8000 });
+        const rep = await page.evaluate(() => {
+          const tiers = Array.from(document.querySelectorAll('#mr-tiers .mr-tier-n')).map(b => Number(b.textContent));
+          const hot1 = document.querySelector('#mr-hotspots .mr-hot');
+          return {
+            tiers: tiers,
+            canvas: !!document.getElementById('mr-canvas') && !!document.getElementById('mr-canvas').getContext,
+            hot1: hot1 ? { w: hot1.querySelector('.mr-hot-word').textContent, score: hot1.querySelector('.mr-hot-score').textContent } : null,
+            hotN: document.querySelectorAll('#mr-hotspots .mr-hot').length,
+            streak: (document.getElementById('mr-streak') || {}).textContent || '',
+            dataDays: (document.getElementById('mr-canvas').getAttribute('data-days')) || '',
+            dataTotal: (document.getElementById('mr-canvas').getAttribute('data-total')) || ''
+          };
+        });
+        const diskRep = await diskSave19();
+        /* 与 localStorage 同源核对：档位分布（abandon st1 / absorb st2 / access st0）
+           + 遗忘热点 Top1 = 错次×逾期加权最大者 + 连续天数 */
+        const wantTiers = [0, 0, 0, 0, 0];
+        Object.keys(diskRep.srs || {}).forEach(k => {
+          const st = Math.max(0, Math.min(4, diskRep.srs[k].st | 0));
+          wantTiers[st]++;
+        });
+        ok('S19-E 档位分布与 localStorage 一致（' + JSON.stringify(rep.tiers) + '）',
+          JSON.stringify(rep.tiers) === JSON.stringify(wantTiers) && rep.tiers.reduce((a, b) => a + b, 0) === 3,
+          JSON.stringify({ got: rep.tiers, want: wantTiers }));
+        ok('S19-E 未来 7 天到期曲线 canvas 就绪（ctx 可取）', rep.canvas === true, rep.canvas);
+        ok('S19-E 遗忘热点 Top1 = abandon（错 2 次 × 已逾期加权最高）且共 3 个热点',
+          rep.hot1 && rep.hot1.w === 'abandon' && rep.hotN === 3, JSON.stringify({ hot1: rep.hot1, n: rep.hotN }));
+        ok('S19-E 连续学习天数与存档一致（streak 5 天 / 今日 7 题）',
+          rep.streak.indexOf('5') >= 0 && rep.streak.indexOf('7') >= 0, rep.streak);
+        /* R20b 回归钉：到期曲线柱值与 localStorage 同源一致。镜像 memReportData 分桶语义
+           （逾期→今天桶 / 远期→+6 桶；epoch 毫秒严禁 |0 截断——曾致曲线全 0 或全塌今天） */
+        const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+        const wantDays = [0, 0, 0, 0, 0, 0, 0];
+        Object.keys(diskRep.srs || {}).forEach(k => {
+          const e = diskRep.srs[k];
+          const due = (typeof e.due === 'number' && isFinite(e.due)) ? e.due : 0;
+          if (!(due > 0)) return;
+          let idx = Math.floor((due - startOfToday.getTime()) / 864e5);
+          if (idx < 0) idx = 0;
+          if (idx > 6) idx = 6;
+          wantDays[idx]++;
+        });
+        ok('S19-E 到期曲线柱值与 localStorage 逐桶一致（' + rep.dataDays + '）',
+          rep.dataDays === wantDays.join(',') && Number(rep.dataTotal) === wantDays.reduce((a2, b2) => a2 + b2, 0),
+          JSON.stringify({ got: rep.dataDays, want: wantDays.join(',') }));
+        ok('S19-E 曲线含逾期存量（今天桶 ≥1）且总量 = 到期词数',
+          wantDays[0] >= 1 && Number(rep.dataTotal) === Object.keys(diskRep.srs).filter(k => diskRep.srs[k].due > 0).length,
+          JSON.stringify({ wantDays: wantDays, total: rep.dataTotal }));
+        await page.click('#btn-memreport-back');
+        await backHome(page);
+        ok('S19 全程零页面异常', errors19.length === 0, errors19.join(' | '));
+        await c19.context.close();
       }
 
       /* ============ S-PERF · 性能预算基线（本地服务 · 每轮对比） ============ */
