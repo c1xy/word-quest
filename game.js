@@ -28,6 +28,7 @@ function defaultSave() {
     best: { adventure: 0, endless: 0 },
     settings: {
       sound: true, autoplay: true, bgm: false, rate: 0.9,
+      scheduler: 'sm2',     // r20 调度算法：sm2（SM-2 lite 日阶梯）| fsrs（简化版双参数）
       qtypes: { c2e: true, e2c: false, spell: false, listen: false }
     },
     customLists: [],
@@ -156,6 +157,8 @@ function sanitizeSave(src) {
     var qt = objOr(se.qtypes);
     if (qt) for (k in qt) if (ownKey(qt, k) && typeof qt[k] === 'boolean') d.settings.qtypes[k] = qt[k];
     d.settings.rate = numOr(d.settings.rate, 0.9, 0.5, 2);
+    /* r20 调度算法白名单：仅接受 'fsrs'，其余（脏值/缺失）一律回落 'sm2'——上面的通用字符串白名单会先拷贝原值，这里统一归一 */
+    d.settings.scheduler = (se.scheduler === 'fsrs') ? 'fsrs' : 'sm2';
   }
 
   /* mastery：词条必须为对象（脏字符串条目丢弃），lv 夹取 0-5——负/巨值曾令
@@ -304,13 +307,18 @@ function sanitizeSave(src) {
     if (!ownKey(srS, k)) continue;
     var sr = objOr(srS[k]);
     if (!sr) continue;
-    d.srs[k] = {
+    var row = {
       st: intOr(sr.st, 0, 0, SRS_STAGE_MAX),
       due: intOr(sr.due, 0, 0, SRS_DUE_CAP),
       ok: intOr(sr.ok, 0, 0, 1e9),
       wrong: intOr(sr.wrong, 0, 0, 1e9),
       t: intOr(sr.t, 0, 0, 8.64e15)
     };
+    /* r20 FSRS 简化版双参数（D 难度 1-10 / S 稳定性天数）：白名单放行，脏值夹取；
+       旧档无 d/s 字段 → 保持原五字段形态（向后兼容，SM-2 语义零变化） */
+    if (sr.d !== undefined) row.d = numOr(sr.d, 6, 1, 10);
+    if (sr.s !== undefined) row.s = numOr(sr.s, 1, 0.1, 3650);
+    d.srs[k] = row;
   }
   return d;
 }
@@ -1344,8 +1352,7 @@ function revealRune(word) {
   var pos = posOf(word.m);
   if (pos) bits.push(pos + '.');
   if (p && p.roots.length) {
-    var r0 = p.roots[0], mean = '';
-    CODE_ROOT.forEach(function (r) { if (r[0] === r0) mean = r[1]; });
+    var r0 = p.roots[0], mean = codeRootMean(r0);
     bits.push(r0 + (mean ? '(' + mean + ')' : ''));
   }
   if (!bits.length) { el.hidden = true; return; }
@@ -1627,11 +1634,37 @@ var CODE_SUFFIX = [
   ['al', '…的'], ['ic', '…的'], ['ly', '…地'], ['er', '…者'], ['or', '…者'],
   ['ist', '…的人'], ['ism', '主义'], ['ify', '使…化'], ['ize', '使…化']
 ];
+/* ---------- r20 扩容合并：words.js 的词根词缀扩展库（CODE_*_EXT）并入基础清单 ----------
+   R20 新增 249 条拉丁/希腊词根 + 11 前缀 + 15 后缀（数据工程在 words.js，每条带
+   词源释义与经「词典命中 + 真实拆解」校验的典型词例）。words.js 加载失败（部署漏传/
+   离线半更新）时回退基础清单，词汇密码照常可用——与 buildEnc 同款容错纪律。 */
+var CODE_MERGED = null;
+function codeDict() {
+  if (CODE_MERGED) return CODE_MERGED;
+  var extR = (typeof CODE_ROOT_EXT !== 'undefined') ? CODE_ROOT_EXT : [];
+  var extP = (typeof CODE_PREFIX_EXT !== 'undefined') ? CODE_PREFIX_EXT : [];
+  var extS = (typeof CODE_SUFFIX_EXT !== 'undefined') ? CODE_SUFFIX_EXT : [];
+  CODE_MERGED = {
+    roots: CODE_ROOT.concat(extR),
+    prefixes: CODE_PREFIX.concat(extP),
+    suffixes: CODE_SUFFIX.concat(extS)
+  };
+  return CODE_MERGED;
+}
+/* 词根释义查表（合并清单：基础 + 扩容），符文/实验室/词族共用 */
+function codeRootMean(root) {
+  var D = codeDict();
+  for (var i = 0; i < D.roots.length; i++) {
+    if (D.roots[i][0] === root) return D.roots[i][1];
+  }
+  return '';
+}
 function parseOnce(w, usePrefix) {
   try {
+    var D = codeDict();
     var rest = w, segs = [], matched = 0, roots = [];
     if (usePrefix) {
-      var prefs = CODE_PREFIX.slice().sort(function (a, b) { return b[0].length - a[0].length; });
+      var prefs = D.prefixes.slice().sort(function (a, b) { return b[0].length - a[0].length; });
       for (var i = 0; i < prefs.length; i++) {
         if (rest.length >= prefs[i][0].length + 2 && rest.indexOf(prefs[i][0]) === 0) {
           segs.push({ pos: -1, t: prefs[i][0] + '-(' + prefs[i][1] + ')' });
@@ -1641,7 +1674,7 @@ function parseOnce(w, usePrefix) {
         }
       }
     }
-    var sufs = CODE_SUFFIX.slice().sort(function (a, b) { return b[0].length - a[0].length; });
+    var sufs = D.suffixes.slice().sort(function (a, b) { return b[0].length - a[0].length; });
     var sufSeg = null;
     for (var j = 0; j < sufs.length; j++) {
       var L = rest.length - sufs[j][0].length;
@@ -1653,7 +1686,7 @@ function parseOnce(w, usePrefix) {
       }
     }
     var hits = [];
-    var rlist = CODE_ROOT.slice().sort(function (a, b) { return b[0].length - a[0].length; });
+    var rlist = D.roots.slice().sort(function (a, b) { return b[0].length - a[0].length; });
     for (var k = 0; k < rlist.length && hits.length < 2; k++) {
       var r = rlist[k];
       var at = rest.indexOf(r[0]);
@@ -2296,9 +2329,7 @@ function labPool() {   /* 有拆解结果、有释义的内置词 */
   return labPoolMemo;
 }
 function labRootMean(root) {
-  var mean = '';
-  CODE_ROOT.forEach(function (r) { if (r[0] === root) mean = r[1]; });
-  return mean;
+  return codeRootMean(root);
 }
 function labQuestion() {
   var pool = labPool();
@@ -2309,8 +2340,9 @@ function labQuestion() {
     q.kind = 'split';
     var opts = [{ t: root, mean: q.rootMean, ok: true }];
     var guard = 0;
+    var rootPool = codeDict().roots;   /* r20：扩容词根并入拆解挑战干扰项池 */
     while (opts.length < 4 && guard++ < 300) {
-      var r2 = rnd(CODE_ROOT);
+      var r2 = rnd(rootPool);
       if (r2[0] === root || opts.some(function (o) { return o.t === r2[0]; })) continue;
       opts.push({ t: r2[0], mean: r2[1], ok: false });
     }
@@ -2648,6 +2680,8 @@ function srsGet(w) {
   return save.srs[w] || (save.srs[w] = { st: 0, due: 0, ok: 0, wrong: 0, t: 0 });
 }
 function srsReview(w, ok) {
+  /* r20 调度算法分流：设置页『调度算法』= fsrs 时走 FSRS 简化版，默认 SM-2 lite */
+  if (save.settings && save.settings.scheduler === 'fsrs') { fsrsReview(w, ok); return; }
   var e = srsGet(w);
   var pre = e.st | 0;
   if (ok) {
@@ -2662,6 +2696,51 @@ function srsReview(w, ok) {
     e.due = Date.now();
   }
   e.t = Date.now();
+  persist();
+}
+
+/* ========================= FSRS 简化版调度（r20 记忆科学二期，可选算法） =========================
+   双参数建模：D 难度（1-10，越大越难）+ S 稳定性（天，可提取性随时间衰减、S 越大忘得越慢）。
+   · 到期：due = now + S 天（S 即当前记忆痕迹的预期寿命）；
+   · 答对：S 按难度拉长——S' = S × (1.15 + 0.05×(10−D))（越简单涨越快），封顶 365 天；
+     D 微降 0.5（答对说明比预估容易）；st 档位 +1（显示语义与 SM-2 一致）。
+   · 答错：D 上调 +1.5，S 重置为再学习稳定性（0.5~3 天，越难越短）；due=now 今日重学；
+     st 档位 −1（与 SM-2 同款降档）。
+   · 老档平滑迁移：首次切到 FSRS 后逐词「懒派生」——从 st/due 推出 D（档位越高越容易）
+     与 S（剩余到期天数；全新生词给初始 D=6 / S=1.2 天），不一次性重写全库；
+   · 切回 SM-2：st/due/ok/wrong/t 原样保留继续用，d/s 字段留存（sanitize 白名单放行），
+     再次切 FSRS 时从既有 d/s 续跑、不重派生——双向切换零丢失。 */
+var FSRS_S_MAX = 365;
+function fsrsRound1(x) { return Math.round(x * 10) / 10; }
+function fsrsMult(d) { return 1.15 + 0.05 * (10 - d); }
+function fsrsDerive(e) {
+  var st = Math.max(0, Math.min(SRS_STAGE_MAX, e.st | 0));
+  if (!e.ok && !e.wrong && !(e.due > 0)) {
+    e.d = 6;                                   /* 全新生词：初始难度 */
+    e.s = 1.2;                                 /* 全新生词：初始稳定性（天） */
+  } else {
+    e.d = Math.max(1, Math.min(10, 7 - st));   /* 档位越高越容易 */
+    e.s = (e.due > Date.now()) ? Math.max(0.5, fsrsRound1((e.due - Date.now()) / 864e5)) : 0.5;
+  }
+}
+function fsrsReview(w, ok) {
+  var e = srsGet(w);
+  var pre = e.st | 0;
+  if (e.d === undefined || e.s === undefined) fsrsDerive(e);   /* 首次 FSRS 作答：从 st/due 懒派生 */
+  e.t = Date.now();
+  if (ok) {
+    e.ok = (e.ok || 0) + 1;
+    e.s = Math.min(FSRS_S_MAX, fsrsRound1(e.s * fsrsMult(e.d)));   /* 答对按难度拉长稳定性 */
+    e.d = Math.max(1, fsrsRound1(e.d - 0.5));                       /* 答对：难度微降 */
+    e.st = Math.min(SRS_STAGE_MAX, pre + 1);
+    e.due = Date.now() + Math.max(1, Math.round(e.s * 864e5));      /* 可提取性随 S 衰减 → 到期 */
+  } else {
+    e.wrong = (e.wrong || 0) + 1;
+    e.d = Math.min(10, fsrsRound1(e.d + 1.5));                      /* 答错：难度上调 */
+    e.s = fsrsRound1(Math.max(0.5, Math.min(3, 0.5 + (10 - e.d) * 0.15)));  /* S 重置为再学习稳定性 */
+    e.st = Math.max(0, pre - 1);
+    e.due = Date.now();
+  }
   persist();
 }
 function srsEndOfToday() {
@@ -5246,6 +5325,8 @@ function showMemCard(word, cb) {
   $('mem-speak-btn').classList.remove('listening');
   $('mem-speak-btn').disabled = false;
   $('mem-speak-btn').textContent = '🎤 跟读挑战 +5🪙';
+  /* r20 易混词对比卡：复习会话（srs）答错时展示——挖掘对/种子对 + 差异高亮 + 对比例句 */
+  injectConfuseCompare(word.w, 'mem-confuse', true);
   $('memcard').hidden = false;
   overlayFocusIn('memcard', '#mem-ok');
   memCb = cb;
@@ -5310,6 +5391,127 @@ function makeDeco(el, emojis, n) {
   }
 }
 
+/* ========================= 🧠 记忆报告（主页入口，r20 记忆科学二期） =========================
+   纯 DOM/canvas 渲染，数据全部来自本地存档（save.srs / save.wrongBook / save.streak /
+   save.mastery），与 localStorage 严格同源——e2e 逐项断言两者一致。
+   四个板块：① 记忆档位分布（SM-2 档位 / FSRS 模式下 st 仍同步语义）；
+   ② 未来 7 天到期曲线（canvas 柱状，含今日存量）；
+   ③ 遗忘热点 Top10（错题本错次 × 逾期天数加权，点击直达词画像）；
+   ④ 连续学习天数（打卡 streak + 今日已答）。 */
+function memReportData() {
+  var srsMap = save.srs || {};
+  var tiers = [0, 0, 0, 0, 0];
+  var dayBuckets = [0, 0, 0, 0, 0, 0, 0];   /* 今天 ~ +6 天 */
+  var startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+  var DAY = 864e5;
+  var now = Date.now();
+  for (var w in srsMap) {
+    if (!ownKey(srsMap, w)) continue;
+    var e = srsMap[w];
+    if (!e || typeof e !== 'object') continue;
+    var st = Math.max(0, Math.min(SRS_STAGE_MAX, e.st | 0));
+    tiers[st]++;
+    /* due 是 epoch 毫秒（>2^31）：严禁 | 0 按位截断——r17 srsDueList 同款纪律，
+       截断后负值被 due>0 过滤、小正值全部塌缩进「今天」桶（R20 双端试玩缺陷修复） */
+    var due = (typeof e.due === 'number' && isFinite(e.due)) ? e.due : 0;
+    if (due > 0 && meaningOfAny(w)) {
+      var idx = Math.floor((due - startOfToday.getTime()) / DAY);
+      if (idx < 0) idx = 0;                    /* 已逾期 → 计入今天存量 */
+      if (idx > 6) idx = 6;                    /* 远期 → 计入 +6 天桶 */
+      dayBuckets[idx]++;
+    }
+  }
+  /* 遗忘热点：错次 × (1 + 逾期天数)，逾期按 srs.due（无则 mastery.due） */
+  var wb = save.wrongBook || {};
+  var hotspots = Object.keys(wb).map(function (k) {
+    var entry = wb[k];
+    var se = srsMap[k] || {};
+    var dueRef = (se.due > 0) ? se.due : ((save.mastery[k] || {}).due || 0);
+    var overdueDays = Math.max(0, Math.floor((now - dueRef) / DAY));
+    var score = (entry.n | 0) * (1 + overdueDays);
+    return { w: k, n: entry.n | 0, overdue: overdueDays, score: score };
+  }).filter(function (h) { return h.n >= 1 && meaningOfAny(h.w); })
+    .sort(function (a, b) { return b.score - a.score || (a.w < b.w ? -1 : 1); })
+    .slice(0, 10);
+  return {
+    tiers: tiers,
+    tierTotal: tiers.reduce(function (s, x) { return s + x; }, 0),
+    days: dayBuckets,
+    dayTotal: dayBuckets.reduce(function (s, x) { return s + x; }, 0),
+    hotspots: hotspots,
+    streak: save.streak.count | 0,
+    todayCount: save.streak.todayCount | 0,
+    scheduler: (save.settings && save.settings.scheduler === 'fsrs') ? 'FSRS 简化版' : 'SM-2 lite'
+  };
+}
+function renderMemReport() {
+  var d = memReportData();
+  /* ① 档位分布（DOM 横条） */
+  var tierMax = Math.max(1, d.tiers.reduce(function (s, x) { return Math.max(s, x); }, 0));
+  $('mr-tiers').innerHTML = SRS_TIERS.map(function (name, i) {
+    var n = d.tiers[i];
+    return '<div class="mr-tier"><span class="mr-tier-name">' + name + '</span>' +
+      '<div class="mr-tier-bar"><i style="width:' + Math.round(n / tierMax * 100) + '%"></i></div>' +
+      '<b class="mr-tier-n">' + n + '</b></div>';
+  }).join('') + '<p class="hint">共 ' + d.tierTotal + ' 词在排程 · 当前算法：' + d.scheduler + '</p>';
+  /* ② 未来 7 天到期曲线（canvas 柱状图） */
+  drawMemDueCanvas(d.days);
+  /* ③ 遗忘热点 Top10 */
+  $('mr-hotspots').innerHTML = d.hotspots.length
+    ? d.hotspots.map(function (h) {
+      return '<button class="mr-hot" data-w="' + h.w + '">' +
+        '<span class="mr-hot-word">' + h.w + '</span>' +
+        '<span class="mr-hot-mean">' + meaningOfAny(h.w) + '</span>' +
+        '<span class="mr-hot-score">错 ' + h.n + ' 次 · 逾期 ' + h.overdue + ' 天 · 热度 ' + h.score + '</span></button>';
+    }).join('')
+    : '<p class="hint">暂无遗忘热点——答错的词会按「错次 × 逾期」加权出现在这里。</p>';
+  var hotWrap = $('mr-hotspots');
+  hotWrap.onclick = function (e) {
+    var row = e.target.closest('.mr-hot');
+    if (row && row.dataset.w) openWordDetail(row.dataset.w);
+  };
+  /* ④ 连续学习天数 */
+  $('mr-streak').innerHTML =
+    '<span class="chip">🔥 连续学习 <b>' + d.streak + '</b> 天</span>' +
+    '<span class="chip">✏️ 今日已答 <b>' + d.todayCount + '</b> 题</span>';
+}
+function drawMemDueCanvas(days) {
+  var canvas = $('mr-canvas');
+  if (!canvas || !canvas.getContext) return;
+  /* 柱值镜像到 data-days（e2e S19-E 断言曲线与存档一致；canvas 像素无法直接读取） */
+  canvas.setAttribute('data-days', days.join(','));
+  canvas.setAttribute('data-total', String(days.reduce(function (s, x) { return s + x; }, 0)));
+
+  var ctx = canvas.getContext('2d');
+  var W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  var padL = 8, padB = 20, padT = 10;
+  var max = Math.max(1, days.reduce(function (s, x) { return Math.max(s, x); }, 0));
+  var bw = (W - padL * 2) / 7;
+  var labels = ['今天', '明天', '后天', '+3天', '+4天', '+5天', '+6天'];
+  for (var i = 0; i < 7; i++) {
+    var h = Math.round((H - padB - padT) * days[i] / max);
+    var x = padL + i * bw + 6;
+    var y = H - padB - h;
+    /* 柱体：今日存量用强调色，未来日期用常规色（色弱冗余：柱顶标数值） */
+    ctx.fillStyle = i === 0 ? '#c8842c' : '#6a8fd8';
+    ctx.fillRect(x, y, bw - 12, h);
+    ctx.fillStyle = '#9aa4b5';
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(labels[i], x + (bw - 12) / 2, H - 6);
+    if (days[i] > 0) {
+      ctx.fillStyle = '#e8ecf4';
+      ctx.fillText(String(days[i]), x + (bw - 12) / 2, y - 3);
+    }
+  }
+  $('mr-due-total').textContent = '未来 7 天共 ' + days.reduce(function (s, x) { return s + x; }, 0) + ' 词到期（今日存量含已逾期）';
+}
+function openMemReport() {
+  showScreen('scr-memreport');
+  renderMemReport();
+}
+
 /* ========================= 错题本 ========================= */
 function openWrongBook() {
   showScreen('scr-wrong');
@@ -5356,6 +5558,136 @@ function startDrill() {
 }
 
 /* ========================= 屏幕切换 ========================= */
+/* ========================= 易混词对比卡（r20 记忆科学二期） =========================
+   数据源两条线（每词取加权分最高的一对）：
+   ① 错题本挖掘：两词都在错题本（wrongBook.n ≥ 1），且 形近（编辑距离 ≤ 2）
+     或 同根（parseCode 词根交集）——来源标注「错题本挖掘」；
+   ② 数据不足时回落 words.js 的 CONFUSE_SEED 预置种子对（≥16 对真实产出，
+     每对标注「预置种子对」与成因 tag）。
+   渲染：两词并列 + LCS 差异字符高亮 + 各一条例句（sentences.js 语料优先，
+   未收录词走 clozeOf 模板填充兜底）。复习会话（run.mode='srs'）答错的记忆卡
+   与图鉴词详情卡共用同一渲染器。 */
+function editDistAtMost2(a, b) {
+  if (a === b) return true;
+  var m = a.length, n = b.length;
+  if (Math.abs(m - n) > 2) return false;
+  var prev = [], cur = [], i, j, t;
+  for (j = 0; j <= n; j++) prev[j] = j;
+  for (i = 1; i <= m; i++) {
+    cur[0] = i;
+    var rowMin = i;
+    for (j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1,
+        prev[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
+      if (cur[j] < rowMin) rowMin = cur[j];
+    }
+    if (rowMin > 2) return false;   /* 整行最小值已超 2，提前剪枝 */
+    t = prev; prev = cur; cur = t;
+  }
+  return prev[n] <= 2;
+}
+function shareRoot(a, b) {
+  var pa = parseCode(a), pb = parseCode(b);
+  if (!pa || !pb) return false;
+  return pa.roots.some(function (r) { return pb.roots.indexOf(r) >= 0; });
+}
+var confuseSeedBy = null;
+function confuseSeedMap() {
+  if (confuseSeedBy) return confuseSeedBy;
+  confuseSeedBy = {};
+  var seeds = (typeof CONFUSE_SEED !== 'undefined' && CONFUSE_SEED) ? CONFUSE_SEED : [];
+  seeds.forEach(function (s) {
+    [s[0], s[1]].forEach(function (k) {
+      if (!confuseSeedBy[k]) confuseSeedBy[k] = [];
+      if (confuseSeedBy[k].indexOf(s) < 0) confuseSeedBy[k].push(s);
+    });
+  });
+  return confuseSeedBy;
+}
+var confuseMemo = {};
+function confusePairsOf(w) {
+  if (w in confuseMemo) return confuseMemo[w];
+  var out = [];
+  var wb = save.wrongBook || {};
+  var mine = wb[w];
+  if (mine && mine.n >= 1) {
+    Object.keys(wb).forEach(function (o) {
+      if (o === w) return;
+      var other = wb[o];
+      if (!other || !(other.n >= 1)) return;
+      if (editDistAtMost2(w, o) || shareRoot(w, o)) {
+        out.push({ a: w, b: o, score: (mine.n || 1) + (other.n || 1), src: '错题本挖掘' });
+      }
+    });
+  }
+  if (!out.length) {
+    (confuseSeedMap()[w] || []).forEach(function (s) {
+      out.push({ a: s[0], b: s[1], score: 1, src: '预置种子对', tag: s[2] });
+    });
+  }
+  out.sort(function (x, y) { return y.score - x.score; });
+  confuseMemo[w] = out;
+  return out;
+}
+/* LCS 字符对齐：非公共字符包 <b.cc-hl> 高亮（两词都 ≤12 字符，O(n²) 可忽略） */
+function confuseDiffHtml(a, b) {
+  var m = a.length, n = b.length;
+  var i, j, dp = [];
+  for (i = 0; i <= m; i++) {
+    dp.push([]);
+    for (j = 0; j <= n; j++) dp[i].push(0);
+  }
+  for (i = m - 1; i >= 0; i--) {
+    for (j = n - 1; j >= 0; j--) {
+      dp[i][j] = (a.charAt(i) === b.charAt(j)) ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  var html = '', x = 0, y = 0, buf = '';
+  var flush = function () { if (buf) { html += '<b class="cc-hl">' + buf + '</b>'; buf = ''; } };
+  while (x < m && y < n) {
+    if (a.charAt(x) === b.charAt(y)) { flush(); html += a.charAt(x); x++; y++; }
+    else if (dp[x + 1][y] >= dp[x][y + 1]) { buf += a.charAt(x); x++; }
+    else { buf += a.charAt(x); x++; }
+  }
+  while (x < m) { buf += a.charAt(x); x++; }
+  flush();
+  return html;
+}
+/* 对比卡例句：语料句（目标词加粗高亮）优先，模板句填充兜底 */
+function confuseSentenceHtml(word) {
+  var corpus = sentencesOf(word);
+  if (corpus) return '“' + boldWordIn(corpus[0], word) + '”';
+  return '“' + clozeOf(word).replace('____', '<b class="cc-hl">' + word + '</b>') + '”';
+}
+function confuseCompareHtml(w) {
+  var pair = confusePairsOf(w)[0];
+  if (!pair) return '';
+  var a = pair.a, b = pair.b;
+  var srcNote = pair.src + (pair.tag ? ' · ' + pair.tag : '');
+  return '<div class="cc-title">⚖️ 易混词对比 <span class="cc-src">' + srcNote + '</span></div>' +
+    '<div class="cc-grid">' +
+      '<div class="cc-col"><button class="cc-word" data-w="' + a + '">' + confuseDiffHtml(a, b) + '</button>' +
+        '<div class="cc-sent">' + confuseSentenceHtml(a) + '</div></div>' +
+      '<div class="cc-col"><button class="cc-word" data-w="' + b + '">' + confuseDiffHtml(b, a) + '</button>' +
+        '<div class="cc-sent">' + confuseSentenceHtml(b) + '</div></div>' +
+    '</div>';
+}
+/* 注入易混词对比卡：复习会话答错 → 记忆卡；词详情卡 → 有配对就常驻。
+   返回是否有内容（供调用方决定显隐）。 */
+function injectConfuseCompare(w, elId, srsOnly) {
+  var el = $(elId);
+  if (!el) return false;
+  if (srsOnly && (!run || run.mode !== 'srs')) { el.hidden = true; el.innerHTML = ''; return false; }
+  var html = confuseCompareHtml(w);
+  el.innerHTML = html;
+  el.hidden = !html;
+  el.onclick = function (e) {
+    var btn = e.target.closest('.cc-word');
+    if (btn && btn.dataset.w && btn.dataset.w !== w) TTS.speak(btn.dataset.w, true);
+  };
+  return !!html;
+}
+
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(function (s) {
     s.classList.toggle('active', s.id === id);
@@ -5658,6 +5990,8 @@ function openWordDetail(w) {
     famEl.innerHTML = html;
     famEl.hidden = false;
   } else famEl.hidden = true;
+  /* r20 易混词对比卡：词详情卡常驻展示（错题本挖掘对优先，数据不足走预置种子对） */
+  injectConfuseCompare(w, 'wo-confuse', false);
   renderWordProfile(w, mean);
   var m = save.mastery[w];
   var stats = [];
@@ -5687,10 +6021,12 @@ function closeWordOverlay() {
   overlayFocusBack();
 }
 
-/* ========================= 记忆画像（词详情弹层，r17 新增维度） =========================
-   三行结构：① 词根/词缀拆解（复用词汇密码 parseCode，无词根词 fallback 简易音节拆分）
+/* ========================= 记忆画像（词详情弹层，r17 三行 → r20 五行） =========================
+   ① 词根/词缀拆解（复用词汇密码 parseCode，无词根词 fallback 简易音节拆分）
    ② 联想提示一行（词景 emoji + 该类词的联想钩子短语；无词景时退回拆解/音节节奏提示）
-   ③ 例句填空：按词性模板挖空目标词，首字母提示可展开（aria-expanded），再点揭晓答案。
+   ③ 例句填空：语料句（sentences.js 双例句切换）优先，未收录词走词性模板挖空（兜底不变）；
+     首字母提示可展开（aria-expanded），再点揭晓答案。
+   ④ 同根词族图谱行（r20）：词根 → 同根词放射列表，点击词块互跳画像；无词根词隐藏该行。
    全部按需渲染（openWordDetail 时现算），emoji/CSS 组合零依赖不卡帧。 */
 function renderWordProfile(w, mean) {
   var box = $('wo-profile');
@@ -5709,19 +6045,44 @@ function renderWordProfile(w, mean) {
   else if (syl) assoc = '按 ' + syl + ' 的节奏读三遍，让声音绑定画面';
   else assoc = '闭上眼把「' + (mean || w) + '」想象成一个画面';
   rows.push('<div class="wp-row"><span class="wp-tag">💡 联想</span><span class="wp-val">' + assoc + '</span></div>');
-  /* ③ 例句填空：挖空目标词 + 可展开首字母提示 + 揭晓 */
-  var cloze = clozeOf(w);
+  /* ③ 例句填空：语料句优先（双例句切换），未收录词走词性模板（兜底不变） */
+  var corpus = sentencesOf(w);
+  var cloze = corpus ? blankWordIn(corpus[0], w) : clozeOf(w);
   rows.push(
     '<div class="wp-row wp-cloze"><span class="wp-tag">✍️ 例句</span><span class="wp-val">' + cloze + '</span></div>' +
     '<div class="wp-cloze-tools">' +
       '<button class="btn btn-tiny" id="wo-cloze-hint" aria-expanded="false">🔍 首字母提示</button>' +
       '<button class="btn btn-tiny" id="wo-cloze-reveal">👀 揭晓</button>' +
+      (corpus ? '<button class="btn btn-tiny" id="wo-cloze-next">🔁 换一句 <span class="cloze-idx">1/' + corpus.length + '</span></button>' : '') +
       '<span class="cloze-hint" id="wo-cloze-hinttext" hidden></span>' +
     '</div>');
+  /* ④ 同根词族图谱行（r20）：词根 → 同根词放射列表，点击互跳画像；无词根词隐藏 */
+  var clan = wordClanOf(w, 8);
+  if (clan) {
+    var clanChips = clan.words.map(function (cw) {
+      return '<button class="clan-chip" data-w="' + cw + '" aria-label="查看同根词 ' + cw + ' 画像">' + cw + '</button>';
+    }).join('');
+    var moreN = clan.total - clan.words.length;
+    rows.push(
+      '<div class="wp-row wp-clan"><span class="wp-tag">🌳 词族</span><span class="wp-val clan-list">' +
+      '<b class="clan-root">' + clan.root + '</b><i class="clan-mean">' + (clan.mean ? '(' + clan.mean + ')' : '') + '</i>' +
+      (clanChips || '<i class="clan-none">暂无同根词</i>') +
+      (moreN > 0 ? '<i class="clan-more">+' + moreN + '</i>' : '') +
+      '</span></div>');
+  }
   box.innerHTML = rows.join('');
   box.hidden = false;
-  /* 提示/揭晓按钮：每次 openWordDetail 重新渲染并重新接线（innerHTML 覆盖旧节点） */
+  /* 提示/揭晓/换一句按钮：每次 openWordDetail 重新渲染并重新接线（innerHTML 覆盖旧节点） */
   var hintBtn = $('wo-cloze-hint'), revealBtn = $('wo-cloze-reveal'), hintText = $('wo-cloze-hinttext');
+  var nextBtn = $('wo-cloze-next');
+  var sentIdx = 0;
+  var fillCloze = function (sentence) {
+    var clozeRow = box.querySelector('.wp-cloze .wp-val');
+    if (clozeRow) {
+      clozeRow.innerHTML = sentence.replace('____', '<b class="cloze-word">' + w + '</b>');
+      clozeRow.classList.add('cloze-done');
+    }
+  };
   hintBtn.onclick = function () {
     var open = hintBtn.getAttribute('aria-expanded') === 'true';
     if (open) {
@@ -5736,15 +6097,74 @@ function renderWordProfile(w, mean) {
     }
   };
   revealBtn.onclick = function () {
-    var clozeRow = box.querySelector('.wp-cloze .wp-val');
-    if (clozeRow) {
-      clozeRow.textContent = clozeOf(w).replace('____', w);
-      clozeRow.classList.add('cloze-done');
-    }
+    fillCloze(corpus ? blankWordIn(corpus[sentIdx], w) : clozeOf(w));
     hintText.textContent = w + ' — ' + (mean || '');
     hintText.hidden = false;
     revealBtn.disabled = true;
   };
+  if (nextBtn) {
+    nextBtn.onclick = function () {
+      sentIdx = (sentIdx + 1) % corpus.length;
+      var clozeRow = box.querySelector('.wp-cloze .wp-val');
+      if (clozeRow) {
+        clozeRow.innerHTML = blankWordIn(corpus[sentIdx], w);
+        clozeRow.classList.remove('cloze-done');
+      }
+      var idxEl = nextBtn.querySelector('.cloze-idx');
+      if (idxEl) idxEl.textContent = (sentIdx + 1) + '/' + corpus.length;
+      hintText.hidden = true;
+      revealBtn.disabled = false;
+    };
+  }
+  /* 词族行点击互跳：点同根词块 → 直接打开该词的画像（openWordDetail 递归刷新弹层） */
+  var clanRow = box.querySelector('.wp-clan');
+  if (clanRow) {
+    clanRow.addEventListener('click', function (e) {
+      var chip = e.target.closest('.clan-chip');
+      if (chip && chip.dataset.w && chip.dataset.w !== w) openWordDetail(chip.dataset.w);
+    });
+  }
+}
+
+/* ========================= 例句语料（sentences.js，r20 新增） =========================
+   · sentencesOf(w)：取语料双句；sentences.js 未加载（部署漏传/离线半更新）安全回退 null，
+     画像走 clozeOf 词性模板（兜底不变），易混对比卡走模板填充句。
+   · blankWordIn(s, w)：把句中目标词（大小写不敏感、整词边界）替换成 ____（挖空）；
+     语料意外缺目标词时句尾补 ____（unit 断言兜住语料质量，正常不触发）。 */
+function sentencesOf(w) {
+  try {
+    if (typeof SENTENCES_OF === 'undefined' || !SENTENCES_OF) return null;
+    var arr = SENTENCES_OF[w];
+    return (arr && arr.length >= 2) ? arr : null;
+  } catch (e) { return null; }
+}
+function blankWordIn(sentence, w) {
+  var re = new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+  if (re.test(sentence)) return sentence.replace(re, '____');
+  return sentence + ' (____)';
+}
+function boldWordIn(sentence, w) {
+  var re = new RegExp('\\b(' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')\\b', 'i');
+  if (re.test(sentence)) return sentence.replace(re, '<b class="cc-hl">$1</b>');
+  return sentence + ' <b class="cc-hl">' + w + '</b>';
+}
+
+/* ========================= 同根词族图谱（r20 记忆科学二期） =========================
+   wordClanOf(w, cap)：以词的主词根为圆心，收集词典内共享该词根的同根词（词根家族包
+   同源数据，扩容后 249 词根让词族行覆盖率大幅上升）。返回 {root, mean, words, total}，
+   无词根词返回 null（画像隐藏该行）。wordFamily（旧三词版）继续供记忆卡使用。 */
+function wordClanOf(w, cap) {
+  var p = parseCode(w);
+  if (!p || !p.roots.length) return null;
+  var root = p.roots[0];
+  var clan = [];
+  for (var i = 0; i < ALL_WORDS.length; i++) {
+    var it = ALL_WORDS[i];
+    if (it.w === w) continue;
+    var p2 = parseCode(it.w);
+    if (p2 && p2.roots.indexOf(root) >= 0) clan.push(it.w);
+  }
+  return { root: root, mean: codeRootMean(root), words: clan.slice(0, cap || 8), total: clan.length };
 }
 
 function renderCustomLists() {
@@ -5804,6 +6224,7 @@ function openSettings() {
   $('set-autoplay').checked = save.settings.autoplay;
   $('set-bgm').checked = save.settings.bgm !== false;
   $('set-rate').value = save.settings.rate;
+  $('set-sched').value = save.settings.scheduler === 'fsrs' ? 'fsrs' : 'sm2';
   $('set-plan-target').value = String(save.plan.target || 10);
   $('plan-target-val').textContent = String(save.plan.target || 10);
   $('rate-val').textContent = save.settings.rate.toFixed(1);
@@ -5827,6 +6248,16 @@ function bindSettings() {
     save.settings.rate = parseFloat(this.value);
     $('rate-val').textContent = save.settings.rate.toFixed(1);
     persist();
+  };
+  $('set-sched').onchange = function () {
+    var next = this.value === 'fsrs' ? 'fsrs' : 'sm2';
+    if (save.settings.scheduler === next) return;
+    save.settings.scheduler = next;
+    persist();
+    /* r20 算法切换提示：FSRS 首次作答时逐词从 st/due 懒派生 D/S，切回 SM-2 原字段保留 */
+    toast(next === 'fsrs'
+      ? '🧠 已切换到 FSRS 简化版：老档位将在下次复习时平滑换算成 难度×稳定性 双参数'
+      : '🔁 已切换回 SM-2 lite：原档位与到期时间原样保留，FSRS 参数已留存');
   };
   $('qt-c2e').onchange = function () { save.settings.qtypes.c2e = this.checked; persist(); };
   $('qt-e2c').onchange = function () { save.settings.qtypes.e2c = this.checked; persist(); };
@@ -6641,6 +7072,8 @@ function bindEvents() {
   $('btn-plan').onclick = startPlan;
   $('btn-poison').onclick = function () { openIO('poison'); };
   $('btn-wrongbook').onclick = openWrongBook;
+  $('btn-memreport').onclick = openMemReport;
+  $('btn-memreport-back').onclick = function () { showScreen('scr-home'); refreshHome(); };
   $('btn-wrong-back').onclick = function () { showScreen('scr-home'); refreshHome(); };
   $('btn-drill').onclick = startDrill;
   $('btn-match').onclick = openMatch;
@@ -6857,6 +7290,8 @@ function bindEvents() {
     se.st = SRS_STAGE_MAX;
     se.due = Date.now() + SRS_INTERVAL_DAYS[SRS_STAGE_MAX - 1] * 864e5;
     se.t = Date.now();
+    /* r20 FSRS 同步：FSRS 模式下把稳定性抬到成熟档水位（D 不动，下次作答照常演化） */
+    if (save.settings && save.settings.scheduler === 'fsrs' && se.d !== undefined) se.s = Math.max(se.s || 0, 30);
     persist();
     closeWordOverlay();
     toast('⭐ 已标记「' + woWord + '」为已掌握');
